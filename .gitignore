@@ -1,25 +1,74 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+fussy-git # Default binary name from Makefile
+bin/      # Directory for built binaries from Makefile
 
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool, specifically when run with the
+# -o option
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# IDE and editor specific files
+# IntelliJ
+.idea/
+*.iml
+# VS Code
+.vscode/
+# GoLand
+.GoLand/
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+# Atom
+.atom/
+# Emacs
+*~
+# Vim
+*.swp
+*.swo
+Session.vim
+.netrwhist
 
-# Go workspace file
-go.work
-go.work.sum
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# env file
-.env
+# Local configuration files (if any, e.g., for local testing or dev overrides)
+# config.local.yaml
+# .env
+
+# Go Module graphviz output
+graph.dot
+
+# Profiling data
+*.pprof
+*.prof
+*.cpu
+*.mem
+*.heap
+*.trace
+
+# Coverage reports
+coverage.html
+coverage.out
+cover.html
+
+# Dependency directories (though `go mod` makes these less common in project root)
+vendor/
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
