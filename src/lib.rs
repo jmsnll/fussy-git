@@ -5,8 +5,11 @@
 
 pub mod config;
 pub mod fsops;
+pub mod get;
 pub mod git;
 pub mod identity;
+pub mod index;
+pub mod list;
 pub mod resolve;
 pub mod scan;
 pub mod template;
