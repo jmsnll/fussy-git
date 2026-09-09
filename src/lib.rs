@@ -1,0 +1,13 @@
+//! fussy-git keeps cloned git repositories organised under a configurable root,
+//! deriving each repository's path from its remote URL (for example
+//! `~/git/github.com/{owner}/{repo}`) and reconciling the filesystem against
+//! that layout.
+
+pub mod config;
+pub mod identity;
+pub mod resolve;
+pub mod template;
+pub mod ui;
+
+#[cfg(test)]
+pub mod testutil;

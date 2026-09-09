@@ -1,0 +1,48 @@
+[package]
+name = "fussy-git"
+version = "0.1.0"
+edition = "2021"
+description = "Keeps cloned git repositories organised under a configurable root, by remote URL"
+license = "MIT"
+repository = "https://github.com/jmsnll/fussy-git"
+homepage = "https://github.com/jmsnll/fussy-git"
+readme = "README.md"
+keywords = ["git", "repository", "cli", "workspace", "clone"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.85"
+
+[[bin]]
+name = "fussy-git"
+path = "src/main.rs"
+
+[lib]
+name = "fussy_git"
+path = "src/lib.rs"
+
+[dependencies]
+anstyle = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+regex = "1"
+globset = "0.4"
+anyhow = "1"
+thiserror = "2"
+dirs = "7"
+shellexpand = "3"
+walkdir = "2"
+# crossterm is used via ratatui's re-export (ratatui::crossterm) so the two
+# versions cannot drift apart.
+ratatui = "0.30"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+# Smaller, faster release binaries. `panic = "abort"` is deliberately left
+# unset: `ops::for_each_repo` relies on `catch_unwind` to keep one panicking
+# repository from killing a whole batch.
+lto = "thin"
+codegen-units = 1
+strip = true
