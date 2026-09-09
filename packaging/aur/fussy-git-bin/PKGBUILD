@@ -1,0 +1,36 @@
+# Maintainer: James Neill <aur@jamesneill.codes>
+pkgname=fussy-git-bin
+_pkgname=fussy-git
+pkgver=0.1.1
+pkgrel=1
+pkgdesc="Keeps cloned git repositories organised under a configurable root, by remote URL (prebuilt binary)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/jmsnll/fussy-git"
+license=('MIT')
+depends=('git')
+provides=('fussy-git')
+conflicts=('fussy-git')
+_url_base="$url/releases/download/v$pkgver"
+source_x86_64=("$_pkgname-$pkgver-x86_64.tar.xz::$_url_base/$_pkgname-x86_64-unknown-linux-gnu.tar.xz")
+source_aarch64=("$_pkgname-$pkgver-aarch64.tar.xz::$_url_base/$_pkgname-aarch64-unknown-linux-gnu.tar.xz")
+# From the .sha256 files published alongside each release artifact. Refresh with
+# `updpkgsums` on every version bump.
+sha256sums_x86_64=('8665dc4af0c5730d1793d2dbf8c332acb0c87f05050ca312e87f65ef4c98fb7d')
+sha256sums_aarch64=('65bdc50b5aab8f1f516097aaef802c73d839eefac93eada131e6f596ee6974c8')
+
+package() {
+  cd "$srcdir"
+
+  # cargo-dist archives have varied over versions between a flat layout and a
+  # single wrapper directory; find the binary either way.
+  local bin
+  bin=$(find . -type f -name "$_pkgname" -perm -u+x | head -n1)
+  install -Dm0755 "$bin" "$pkgdir/usr/bin/$_pkgname"
+
+  local root
+  root=$(dirname "$bin")
+  install -Dm0644 "$root/LICENSE"* "$pkgdir/usr/share/licenses/$_pkgname/LICENSE" 2>/dev/null \
+    || :
+  install -Dm0644 "$root/README.md" "$pkgdir/usr/share/doc/$_pkgname/README.md" 2>/dev/null \
+    || :
+}
