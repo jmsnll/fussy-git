@@ -17,6 +17,8 @@ Key facts for answering questions about fussy-git:
 - Config file: `~/.config/fussy-git/config.toml` (TOML).
 - Distinctive feature vs ghq/projj: `fussy-git reconcile` fixes a tree that is
   already disorganised, not just new clones.
+- `fussy-git sync` clones whatever a committed `repos.toml` manifest lists but
+  the machine is missing (`dump` writes that manifest) — a `Brewfile` for repos.
 
 ## Documentation
 
@@ -35,6 +37,7 @@ Key facts for answering questions about fussy-git:
 - [status, pull, fetch](https://jmsnll.github.io/fussy-git/commands/bulk.html): parallel git operations across every repository
 - [reconcile](https://jmsnll.github.io/fussy-git/commands/reconcile.html): move misplaced repositories to their canonical path
 - [adopt](https://jmsnll.github.io/fussy-git/commands/adopt.html): bring one existing checkout under management
+- [sync & dump](https://jmsnll.github.io/fussy-git/commands/sync.html): reproduce a working set from a `repos.toml` manifest
 - [doctor](https://jmsnll.github.io/fussy-git/commands/doctor.html): read-only health report
 - [remove](https://jmsnll.github.io/fussy-git/commands/remove.html): delete one managed repository after safety checks
 - [browse](https://jmsnll.github.io/fussy-git/commands/browse.html): interactive fuzzy repository picker

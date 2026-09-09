@@ -225,6 +225,22 @@ pub fn clone(url: &str, dest: &Path, extra: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Clone `url` into `dest`, **capturing** output. On failure the returned error
+/// carries git's stderr. Used where progress must not stream to the terminal —
+/// the parallel clones of `sync --apply`.
+pub fn clone_captured(url: &str, dest: &Path, extra: &[&str]) -> Result<()> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    let mut args: Vec<&OsStr> = vec![OsStr::new("clone")];
+    args.extend(extra.iter().map(OsStr::new));
+    args.push(OsStr::new(url));
+    args.push(dest.as_os_str());
+    run(None, args)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

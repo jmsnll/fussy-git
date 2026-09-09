@@ -14,6 +14,7 @@
 - [status, pull, fetch](./commands/bulk.md)
 - [reconcile](./commands/reconcile.md)
 - [adopt](./commands/adopt.md)
+- [sync & dump](./commands/sync.md)
 - [doctor](./commands/doctor.md)
 - [remove](./commands/remove.md)
 - [browse](./commands/browse.md)
