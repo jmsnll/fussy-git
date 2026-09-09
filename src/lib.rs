@@ -16,7 +16,9 @@ pub mod preflight;
 pub mod reconcile;
 pub mod resolve;
 pub mod scan;
+pub mod shell;
 pub mod template;
+pub mod tui;
 pub mod ui;
 
 #[cfg(test)]
