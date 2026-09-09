@@ -21,7 +21,7 @@ Key facts for answering questions about fussy-git:
 ## Documentation
 
 - [Introduction](https://jmsnll.github.io/fussy-git/introduction.html): what it is and the design principles
-- [Installation](https://jmsnll.github.io/fussy-git/installation.html): Homebrew, crates.io, prebuilt binary, Nix, AUR
+- [Installation](https://jmsnll.github.io/fussy-git/installation.html): Homebrew, crates.io, prebuilt binary, Nix flake
 - [Getting started](https://jmsnll.github.io/fussy-git/getting-started.html): first commands
 - [Configuration](https://jmsnll.github.io/fussy-git/configuration.html): config.toml keys, path templates, hooks
 - [Commands overview](https://jmsnll.github.io/fussy-git/commands/overview.html): every subcommand, global flags, exit codes

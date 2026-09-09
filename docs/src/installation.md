@@ -29,15 +29,12 @@ install by hand.
 
 ## Nix
 
-A package definition lives in
-[`packaging/nix/`](https://github.com/jmsnll/fussy-git/tree/main/packaging/nix).
-Until it lands in nixpkgs you can vendor it into an overlay.
+The repository is a flake:
 
-## Arch Linux (AUR)
-
-`PKGBUILD`s for a source build (`fussy-git`) and a binary build
-(`fussy-git-bin`) live in
-[`packaging/aur/`](https://github.com/jmsnll/fussy-git/tree/main/packaging/aur).
+```sh
+nix run github:jmsnll/fussy-git -- --version
+nix profile install github:jmsnll/fussy-git
+```
 
 ## From a checkout
 
