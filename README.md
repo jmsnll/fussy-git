@@ -45,8 +45,7 @@ nix run github:jmsnll/fussy-git
 cargo install --path .
 ```
 
-Requires a `git` binary on `PATH`. Arch Linux `PKGBUILD`s and a nixpkgs
-derivation live in [`packaging/`](packaging/).
+Requires a `git` binary on `PATH`.
 
 ## Quick start
 
