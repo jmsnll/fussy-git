@@ -12,6 +12,8 @@ pub mod identity;
 pub mod index;
 pub mod list;
 pub mod ops;
+pub mod preflight;
+pub mod reconcile;
 pub mod resolve;
 pub mod scan;
 pub mod template;
