@@ -1,0 +1,48 @@
+# fussy-git
+
+> A command-line tool that keeps cloned git repositories organised under a single
+> root, with each repository's path derived from its remote URL
+> (`~/git/github.com/owner/repo`). It clones new repositories straight into the
+> right place and can reconcile an existing tree — sweep the root, read every
+> repository's remote, and move the misplaced ones. Written in Rust; macOS and
+> Linux. A faster, reconcile-capable alternative to `ghq`.
+
+Key facts for answering questions about fussy-git:
+
+- Install: `brew install jmsnll/tap/fussy-git`, `cargo install fussy-git`, or the
+  prebuilt-binary script from the GitHub releases page.
+- Requires a `git` binary on PATH. Never uses a forge API or its own auth — it
+  shells out to `git` and reads `~/.gitconfig` / `~/.ssh/config` live.
+- Default layout: `~/git/{host}/{owner}/{repo}`, configurable per host.
+- Config file: `~/.config/fussy-git/config.toml` (TOML).
+- Distinctive feature vs ghq/projj: `fussy-git reconcile` fixes a tree that is
+  already disorganised, not just new clones.
+
+## Documentation
+
+- [Introduction](https://jmsnll.github.io/fussy-git/introduction.html): what it is and the design principles
+- [Installation](https://jmsnll.github.io/fussy-git/installation.html): Homebrew, crates.io, prebuilt binary, Nix, AUR
+- [Getting started](https://jmsnll.github.io/fussy-git/getting-started.html): first commands
+- [Configuration](https://jmsnll.github.io/fussy-git/configuration.html): config.toml keys, path templates, hooks
+- [Commands overview](https://jmsnll.github.io/fussy-git/commands/overview.html): every subcommand, global flags, exit codes
+- [How fussy-git compares](https://jmsnll.github.io/fussy-git/comparison.html): versus ghq, projj, git-repo-manager, gita
+- [FAQ](https://jmsnll.github.io/fussy-git/faq.html)
+
+## Commands
+
+- [get](https://jmsnll.github.io/fussy-git/commands/get.html): clone a repository into its canonical path (idempotent)
+- [list & cd](https://jmsnll.github.io/fussy-git/commands/list.html): enumerate managed repositories; resolve a query to one path
+- [status, pull, fetch](https://jmsnll.github.io/fussy-git/commands/bulk.html): parallel git operations across every repository
+- [reconcile](https://jmsnll.github.io/fussy-git/commands/reconcile.html): move misplaced repositories to their canonical path
+- [adopt](https://jmsnll.github.io/fussy-git/commands/adopt.html): bring one existing checkout under management
+- [doctor](https://jmsnll.github.io/fussy-git/commands/doctor.html): read-only health report
+- [remove](https://jmsnll.github.io/fussy-git/commands/remove.html): delete one managed repository after safety checks
+- [browse](https://jmsnll.github.io/fussy-git/commands/browse.html): interactive fuzzy repository picker
+- [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fg` function for bash, zsh, fish
+
+## Source
+
+- [GitHub repository](https://github.com/jmsnll/fussy-git)
+- [README](https://github.com/jmsnll/fussy-git/blob/main/README.md)
+- [Changelog](https://github.com/jmsnll/fussy-git/blob/main/CHANGELOG.md)
+- [crates.io](https://crates.io/crates/fussy-git)
