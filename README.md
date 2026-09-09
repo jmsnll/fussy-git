@@ -27,6 +27,16 @@ binary, so that configuration always applies. `fussy-git` never links libgit2.
 ## Install
 
 ```sh
+# Homebrew
+brew install jmsnll/tap/fussy-git
+
+# crates.io
+cargo install fussy-git
+
+# Prebuilt binary (macOS, Linux)
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jmsnll/fussy-git/releases/latest/download/fussy-git-installer.sh | sh
+
+# From a checkout
 cargo install --path .
 ```
 
@@ -132,8 +142,8 @@ cargo fmt --check
 
 ## Status
 
-Feature-complete for v1. Not yet published to crates.io. A fork workflow for
-`get` (`--fork`) is not implemented.
+Feature-complete for v1. A fork workflow for `get` (`--fork`) is not implemented,
+and Windows is not yet supported.
 
 ## License
 
