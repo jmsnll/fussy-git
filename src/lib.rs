@@ -4,8 +4,11 @@
 //! that layout.
 
 pub mod config;
+pub mod fsops;
+pub mod git;
 pub mod identity;
 pub mod resolve;
+pub mod scan;
 pub mod template;
 pub mod ui;
 
