@@ -80,8 +80,27 @@ applies.
 
 Each hook command runs with the repository as its working directory.
 
-- `post_get` — after a successful `get`
+- `post_get` — after a successful `get` (and each clone `sync --apply` performs)
 - `post_move` — after `reconcile`/`adopt` moves a repository
 
 This is the place to wire in local setup, editor integration, or
 `git maintenance`.
+
+## The manifest (`repos.toml`)
+
+Separate from `config.toml`: `config.toml` is machine-local policy, `repos.toml`
+is a portable list of *which repositories* a machine should have. It is
+discovered the same way (`--manifest`, `$FUSSY_GIT_MANIFEST`, the current
+directory or an ancestor, then `~/.config/fussy-git/repos.toml`) and drives
+[`sync`](./commands/sync.md):
+
+```toml
+repos = [
+  "jmsnll/fussy-git",
+  "github.com/rust-lang/rust",
+  "git@gitlab.com:acme/backend/api.git",
+]
+```
+
+It never contains hooks or other executable content, so it is safe to commit and
+share.

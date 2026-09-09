@@ -23,6 +23,17 @@ pub struct Outcome<T> {
     pub result: Result<T, String>,
 }
 
+/// The result of running the mapped closure against a single work item — the
+/// generalisation of [`Outcome`] to any `Send + Clone` input, not just a repo
+/// path.
+#[derive(Debug, Clone)]
+pub struct Done<W, T> {
+    /// The work item this outcome belongs to (as passed in).
+    pub item: W,
+    /// `Ok(value)` on success; `Err(message)` on error, panic or timeout.
+    pub result: Result<T, String>,
+}
+
 /// Run `f` against every path in `repos` on a bounded pool of `max(1, jobs)`
 /// worker threads.
 ///
@@ -48,16 +59,34 @@ where
     F: Fn(&Path) -> anyhow::Result<T> + Send + Sync + 'static,
     T: Send + 'static,
 {
-    let total = repos.len();
+    let f = Arc::new(f);
+    for_each(repos, jobs, timeout, move |p: &PathBuf| f(p.as_path()))
+        .into_iter()
+        .map(|Done { item, result }| Outcome { repo: item, result })
+        .collect()
+}
+
+/// The same bounded parallel map as [`for_each_repo`], but over arbitrary
+/// `Send + Clone` work items rather than repository paths — used to clone a set
+/// of missing repositories for `sync`. Ordering, the per-item timeout, and the
+/// panic / error capture are identical.
+pub fn for_each<W, T, F>(items: Vec<W>, jobs: usize, timeout: Duration, f: F) -> Vec<Done<W, T>>
+where
+    W: Send + Clone + 'static,
+    F: Fn(&W) -> anyhow::Result<T> + Send + Sync + 'static,
+    T: Send + 'static,
+{
+    let total = items.len();
     if total == 0 {
         return Vec::new();
     }
 
+    type Slots<W, T> = Arc<Mutex<Vec<Option<Done<W, T>>>>>;
+
     let f = Arc::new(f);
-    let work: Vec<(usize, PathBuf)> = repos.into_iter().enumerate().collect();
+    let work: Vec<(usize, W)> = items.into_iter().enumerate().collect();
     let queue = Arc::new(Mutex::new(work.into_iter()));
-    let slots: Arc<Mutex<Vec<Option<Outcome<T>>>>> =
-        Arc::new(Mutex::new((0..total).map(|_| None).collect()));
+    let slots: Slots<W, T> = Arc::new(Mutex::new((0..total).map(|_| None).collect()));
 
     let worker_count = jobs.max(1).min(total);
     let mut handles = Vec::with_capacity(worker_count);
@@ -70,10 +99,10 @@ where
                 let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
                 guard.next()
             };
-            let Some((idx, repo)) = next else { break };
-            let result = run_one(&f, &repo, timeout);
+            let Some((idx, item)) = next else { break };
+            let result = run_one(&f, &item, timeout);
             let mut guard = slots.lock().unwrap_or_else(|e| e.into_inner());
-            guard[idx] = Some(Outcome { repo, result });
+            guard[idx] = Some(Done { item, result });
         }));
     }
     for handle in handles {
@@ -92,19 +121,20 @@ where
         .collect()
 }
 
-/// Run `f` for one repo on a dedicated thread, bounded by `timeout`.
-fn run_one<T, F>(f: &Arc<F>, repo: &Path, timeout: Duration) -> Result<T, String>
+/// Run `f` for one work item on a dedicated thread, bounded by `timeout`.
+fn run_one<W, T, F>(f: &Arc<F>, item: &W, timeout: Duration) -> Result<T, String>
 where
-    F: Fn(&Path) -> anyhow::Result<T> + Send + Sync + 'static,
+    W: Send + Clone + 'static,
+    F: Fn(&W) -> anyhow::Result<T> + Send + Sync + 'static,
     T: Send + 'static,
 {
     let (tx, rx) = mpsc::channel::<Result<T, String>>();
     let f = Arc::clone(f);
-    let repo = repo.to_path_buf();
+    let item = item.clone();
     // Detached on purpose: on timeout the pool stops waiting, but the thread is
     // left to run to completion rather than being force-killed.
     thread::spawn(move || {
-        let outcome = match panic::catch_unwind(AssertUnwindSafe(|| (*f)(&repo))) {
+        let outcome = match panic::catch_unwind(AssertUnwindSafe(|| (*f)(&item))) {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(err)) => Err(format!("{err:#}")),
             Err(payload) => Err(format!("panicked: {}", panic_message(payload))),

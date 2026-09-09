@@ -10,7 +10,9 @@ repository's path derived from its remote URL:
 
 `fussy-git` clones new repositories straight into the right place, and it can
 **reconcile an existing tree**: sweep the root, read every repository's remote,
-and move the misplaced ones to where they belong.
+and move the misplaced ones to where they belong. A `repos.toml` **manifest**,
+committed to your dotfiles, reproduces your whole working set on a new machine
+with `fussy-git sync --apply`.
 
 **Documentation: <https://jmsnll.github.io/fussy-git/>**
 
@@ -116,6 +118,8 @@ Template placeholders: `{host}`, `{owner}`, `{group_path}` (an alias for
 | `fetch [query]` | Parallel `git fetch --all --prune`. |
 | `reconcile` | Report misplaced repositories, duplicates, and collisions. `--apply` performs the moves; `--allow-dirty`, `--leave-symlink`, `--on-collision`. |
 | `adopt <path>` | Move an existing checkout to its canonical path. `--as host/owner/repo` for a repository with no usable remote. |
+| `sync` | Clone whatever a `repos.toml` manifest lists but the tree is missing. Dry-run by default; `--apply`, `--manifest`, `--jobs`. |
+| `dump` | Write a manifest (`repos = [ … ]`) for the current tree to stdout. |
 | `remove <query>` | Delete one managed repository after checking for unsaved work. `--force`, `--yes`. |
 | `doctor` | Read-only health report: misplaced, duplicate, broken, detached, and (with `--stale 90d`) stale repositories. |
 | `browse` | Full-screen fuzzy repository picker. |
@@ -129,7 +133,7 @@ Template placeholders: `{host}`, `{owner}`, `{group_path}` (an alias for
 | `0` | Success |
 | `1` | Runtime error |
 | `2` | Usage error |
-| `3` | Drift found by a read-only check (`reconcile` dry-run, `doctor`) |
+| `3` | Drift found by a read-only check (`reconcile` dry-run, `sync` dry-run, `doctor`) |
 | `4` | At least one repository in a batch operation failed |
 
 Data goes to stdout, progress and diagnostics to stderr, so

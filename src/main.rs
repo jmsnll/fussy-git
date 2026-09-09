@@ -12,11 +12,13 @@
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use fussy_git::config::{self, Config};
-use fussy_git::{adopt, bulk, doctor, get, index, list, reconcile, remove, scan, shell, tui, ui};
+use fussy_git::{
+    adopt, bulk, doctor, get, index, list, manifest, reconcile, remove, scan, shell, sync, tui, ui,
+};
 
 /// A read-only check that found drift returns this so CI can gate on it.
 const EXIT_DRIFT: u8 = 3;
@@ -78,6 +80,11 @@ enum Command {
     Remove(RemoveArgs),
     /// Report on the health of the managed tree without changing anything.
     Doctor(DoctorArgs),
+    /// Make the tree match a repository manifest: clone what is missing. Without
+    /// `--apply` this only reports what would change.
+    Sync(SyncArgs),
+    /// Write a manifest for the current tree to stdout.
+    Dump,
     /// Interactive repository browser.
     Browse,
     /// Print shell integration to pass to `eval`.
@@ -184,6 +191,19 @@ struct RemoveArgs {
 }
 
 #[derive(Args)]
+struct SyncArgs {
+    /// Clone every missing repository. The default is a dry-run.
+    #[arg(long)]
+    apply: bool,
+    /// Path to the manifest, overriding discovery.
+    #[arg(long, value_name = "PATH")]
+    manifest: Option<std::path::PathBuf>,
+    /// Maximum number of concurrent clones.
+    #[arg(short, long)]
+    jobs: Option<usize>,
+}
+
+#[derive(Args)]
 struct DoctorArgs {
     /// Flag repositories whose last commit is older than this, for example
     /// `90d` or `6mo`.
@@ -241,6 +261,8 @@ fn run() -> Result<ExitCode> {
         Command::Adopt(a) => cmd_adopt(&cfg, a),
         Command::Remove(a) => cmd_remove(&cfg, a),
         Command::Doctor(a) => cmd_doctor(&cfg, a),
+        Command::Sync(a) => cmd_sync(&cfg, a),
+        Command::Dump => cmd_dump(&cfg),
         Command::Browse => cmd_browse(&cfg),
         Command::ShellInit { shell } => {
             let s = match shell {
@@ -415,6 +437,54 @@ fn cmd_doctor(cfg: &Config, a: DoctorArgs) -> Result<ExitCode> {
     let stale = a.stale.as_deref().map(doctor::parse_duration).transpose()?;
     let code = doctor::run(cfg, &doctor::DoctorOptions { stale })?;
     Ok(ExitCode::from(code as u8))
+}
+
+fn cmd_sync(cfg: &Config, a: SyncArgs) -> Result<ExitCode> {
+    let name = manifest::PROJECT_MANIFEST_NAME;
+    let m = manifest::Manifest::discover(a.manifest.as_deref())?.ok_or_else(|| {
+        anyhow!("no manifest found — create {name} or run `fussy-git dump > {name}`")
+    })?;
+
+    let discovered = scan::scan(cfg)?;
+    let plan = sync::plan(cfg, &m, &discovered)?;
+    print!("{}", plan.render(cfg));
+
+    if !a.apply {
+        if !plan.has_drift() {
+            return Ok(ExitCode::SUCCESS);
+        }
+        if !plan.missing.is_empty() {
+            println!("\nrun with --apply to clone the missing repos");
+        }
+        return Ok(ExitCode::from(EXIT_DRIFT));
+    }
+
+    if plan.missing.is_empty() {
+        return Ok(ExitCode::SUCCESS);
+    }
+    println!();
+
+    let report = sync::apply(
+        cfg,
+        &plan,
+        &sync::ApplyOptions {
+            jobs: a.jobs.unwrap_or(cfg.jobs),
+        },
+    )?;
+    print!("{}", report.render(cfg));
+    for w in &report.warnings {
+        eprintln!("{} {w}", ui::warn_prefix());
+    }
+    Ok(if report.failed.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_PARTIAL)
+    })
+}
+
+fn cmd_dump(cfg: &Config) -> Result<ExitCode> {
+    print!("{}", manifest::dump_tree(cfg)?);
+    Ok(ExitCode::SUCCESS)
 }
 
 fn cmd_browse(cfg: &Config) -> Result<ExitCode> {

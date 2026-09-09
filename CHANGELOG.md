@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `sync` — make the tree match a `repos.toml` manifest: report what is missing,
+  extra, or misplaced, and with `--apply` clone the missing repositories in
+  parallel. Dry-run by default, exits `3` on drift and `4` on a partial clone
+  failure. `--manifest` overrides discovery; `--jobs` bounds the concurrency.
+- `dump` — write a manifest for the current tree to stdout (sorted, shortest
+  target form), the adoption path for `sync`.
+- Manifest discovery mirrors `config.toml`: `--manifest`, `$FUSSY_GIT_MANIFEST`,
+  `repos.toml` in the current directory or an ancestor, then
+  `~/.config/fussy-git/repos.toml`. The manifest never carries executable
+  content.
+
 ## [0.1.1] - 2026-09-09
 
 ### Changed
@@ -41,5 +56,6 @@ Initial release.
   ignore globs, collision policy, and lifecycle hooks. SSH `Host` aliases and
   `url.insteadOf` are read live from git and ssh config.
 
+[Unreleased]: https://github.com/jmsnll/fussy-git/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/jmsnll/fussy-git/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jmsnll/fussy-git/releases/tag/v0.1.0

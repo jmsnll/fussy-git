@@ -22,6 +22,11 @@ and/or drive git across many repositories at once.
 - **Bulk operations built in.** `status`, `pull`, and `fetch` run in parallel
   across every managed repository with a partial-failure exit code — no `xargs`
   wrapper needed.
+- **A manifest, not a config tree.** `fussy-git sync` reads a flat `repos.toml`
+  list and clones what is missing; the on-disk layout is *derived*, not spelled
+  out per repo as in `git-repo-manager`. `dump` generates the manifest from a
+  tree you already have. It is the `ghq list | ghq get` workflow with a dry-run,
+  an `extra` report, and no stop-on-first-error.
 - **GitLab subgroups.** The `{group_path}` placeholder spans arbitrarily nested
   groups.
 
@@ -40,6 +45,7 @@ and/or drive git across many repositories at once.
 | `ghq list`              | `fussy-git list`                 |
 | `ghq list --full-path`  | `fussy-git list --path`          |
 | `ghq root`              | `fussy-git root`                 |
+| `ghq list \| ghq get`   | `fussy-git dump` / `fussy-git sync --apply` |
 | *(none)*                | `fussy-git reconcile` / `adopt`  |
 | *(none)*                | `fussy-git status` / `pull` / `doctor` |
 

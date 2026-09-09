@@ -67,9 +67,60 @@ pub fn run(cfg: &config::Config, target: &str, opts: &GetOptions) -> Result<Path
     git::clone(&url, &path, &extra)
         .with_context(|| format!("cloning {url} into {}", path.display()))?;
 
-    run_post_get_hooks(cfg, &path);
+    for warning in post_get_hooks(cfg, &path) {
+        eprintln!("fussy-git: {warning}");
+    }
 
     Ok(path)
+}
+
+/// What [`clone_into`] did.
+pub enum CloneOutcome {
+    /// A fresh clone landed at this path.
+    Cloned(PathBuf),
+    /// A repository was already checked out at the canonical path; nothing done.
+    AlreadyPresent(PathBuf),
+}
+
+/// Clone `id` into its canonical path under `cfg.root`, **capturing** git's
+/// output rather than streaming it. `url` overrides the derived clone URL, used
+/// when a manifest entry was itself a URL. Shared by
+/// [`sync`](crate::sync); the CLI `get` keeps its progress-streaming path.
+///
+/// Hooks are *not* run here — the caller decides, so a parallel batch can
+/// collect hook warnings into its report instead of interleaving them on stderr.
+pub fn clone_into(
+    cfg: &config::Config,
+    id: &Identity,
+    url: Option<&str>,
+    opts: &GetOptions,
+) -> Result<CloneOutcome> {
+    let rel = cfg.template_for(&id.host).render(id, None);
+    let path = cfg.root.join(rel);
+
+    if path.exists() && git::is_repo_root(&path) {
+        return Ok(CloneOutcome::AlreadyPresent(path));
+    }
+
+    let url = match url {
+        Some(u) => u.trim().to_string(),
+        None => clone_url(cfg, id),
+    };
+
+    let mut extra: Vec<&str> = Vec::new();
+    if let Some(branch) = &opts.branch {
+        extra.push("--branch");
+        extra.push(branch);
+    }
+    if opts.shallow {
+        extra.push("--depth");
+        extra.push("1");
+    }
+
+    git::clone_captured(&url, &path, &extra)
+        .with_context(|| format!("cloning {url} into {}", path.display()))?;
+
+    Ok(CloneOutcome::Cloned(path))
 }
 
 /// True when `target` is itself a remote URL rather than a shorthand.
@@ -116,8 +167,10 @@ fn clone_url(cfg: &config::Config, id: &Identity) -> String {
     }
 }
 
-/// Run each `post_get` hook in the freshly cloned repo. Failures are warnings.
-fn run_post_get_hooks(cfg: &config::Config, dir: &Path) {
+/// Run each `post_get` hook in the freshly cloned repo, returning any failures
+/// as warning strings. A hook failure is never fatal.
+pub fn post_get_hooks(cfg: &config::Config, dir: &Path) -> Vec<String> {
+    let mut warnings = Vec::new();
     for cmd in &cfg.hooks.post_get {
         match Command::new("sh")
             .arg("-c")
@@ -126,14 +179,11 @@ fn run_post_get_hooks(cfg: &config::Config, dir: &Path) {
             .status()
         {
             Ok(status) if status.success() => {}
-            Ok(status) => {
-                eprintln!("fussy-git: post_get hook {cmd:?} exited with {status}");
-            }
-            Err(e) => {
-                eprintln!("fussy-git: post_get hook {cmd:?} failed to start: {e}");
-            }
+            Ok(status) => warnings.push(format!("post_get hook {cmd:?} exited with {status}")),
+            Err(e) => warnings.push(format!("post_get hook {cmd:?} failed to start: {e}")),
         }
     }
+    warnings
 }
 
 #[cfg(test)]

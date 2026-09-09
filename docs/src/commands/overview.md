@@ -10,6 +10,8 @@
 | [`fetch`](./bulk.md)            | Fetch across every repository.                                       |
 | [`reconcile`](./reconcile.md)   | Move misplaced repositories to their canonical path.                 |
 | [`adopt`](./adopt.md)           | Bring an existing checkout under management.                         |
+| [`sync`](./sync.md)             | Clone whatever a `repos.toml` manifest lists but the tree is missing. |
+| [`dump`](./sync.md#fussy-git-dump) | Write a manifest for the current tree to stdout.                  |
 | [`doctor`](./doctor.md)         | Read-only health report for the managed tree.                        |
 | [`remove`](./remove.md)         | Delete one managed repository after safety checks.                   |
 | [`browse`](./browse.md)         | Interactive fuzzy repository picker.                                  |
@@ -28,8 +30,8 @@
 | `0`  | Success.                                                       |
 | `1`  | Runtime error.                                                 |
 | `2`  | Usage error.                                                   |
-| `3`  | A read-only check found drift (`reconcile` dry-run, `doctor`). |
-| `4`  | At least one repository in a batch operation failed.           |
+| `3`  | A read-only check found drift (`reconcile` dry-run, `sync` dry-run, `doctor`). |
+| `4`  | At least one repository in a batch operation failed (`pull`, `fetch`, `sync --apply`). |
 
 ## Output discipline
 
