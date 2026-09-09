@@ -1,0 +1,20 @@
+[book]
+title = "fussy-git"
+description = "Keep your cloned git repositories organised under a single root, with each repository's path derived from its remote URL."
+authors = ["James Neill"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/jmsnll/fussy-git"
+edit-url-template = "https://github.com/jmsnll/fussy-git/edit/main/docs/{path}"
+site-url = "/fussy-git/"
+
+[output.html.search]
+enable = true
+
+[output.html.fold]
+enable = true
+level = 1

@@ -12,6 +12,8 @@ repository's path derived from its remote URL:
 **reconcile an existing tree**: sweep the root, read every repository's remote,
 and move the misplaced ones to where they belong.
 
+**Documentation: <https://jmsnll.github.io/fussy-git/>**
+
 ## How it works
 
 The root is treated as state to be reconciled. A small config file describes how
@@ -35,6 +37,9 @@ cargo install fussy-git
 
 # Prebuilt binary (macOS, Linux)
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/jmsnll/fussy-git/releases/latest/download/fussy-git-installer.sh | sh
+
+# Nix
+nix run github:jmsnll/fussy-git
 
 # From a checkout
 cargo install --path .
