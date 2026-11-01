@@ -15,7 +15,6 @@ jobs  = 12                            # concurrency for bulk operations
 default_host = "github.com"           # host for the bare `owner/repo` shorthand
 on_collision = "fail"                 # fail | suffix | skip
 ignore = ["**/node_modules/**", "~/git/scratch/**"]
-worktree_root = "~/git/.worktrees"    # where `worktree add` puts worktrees
 
 [hosts."github.com"]
 alias = ["gh", "github"]              # `fussy-git get gh:jmsnll/fussy-git`
@@ -29,7 +28,6 @@ clone_scheme = "ssh"
 [hooks]
 post_get  = ["git config pull.ff only"]   # run in the repository after `get`
 post_move = ["git maintenance run"]        # run in the repository after a reconcile move
-post_worktree = ["npm ci"]                 # run in each new worktree
 
 [sets]
 payments = ["acme/api", "acme/web", "gl:acme/infra"]   # address as @payments
@@ -45,9 +43,7 @@ payments = ["acme/api", "acme/web", "gl:acme/infra"]   # address as @payments
 | `default_host`     | `github.com`             | Host assumed for the bare `owner/repo` shorthand.                |
 | `default_template` | `{host}/{owner}/{repo}`  | Path template used for any host without its own `template`.      |
 | `on_collision`     | `fail`                   | What to do when two remotes map to one path: `fail`/`suffix`/`skip`. |
-| `fork`             | `prompt`                 | Whether `get` on a repo you cannot push to creates a fork: `prompt`/`always`/`never`. |
 | `ignore`           | `[]`                     | Glob patterns for paths `reconcile` and the index skip.          |
-| `worktree_root`    | `<root>/.worktrees`      | Where [`worktree add`](./commands/worktree.md) creates worktrees. |
 
 ### Per-host `[hosts."<host>"]`
 
@@ -88,7 +84,6 @@ Each hook command runs with the repository as its working directory.
 
 - `post_get` — after a successful `get`
 - `post_move` — after `reconcile`/`adopt` moves a repository
-- `post_worktree` — in each new worktree, after `worktree add` creates it
 
 Hook output goes to stderr, so it never mixes into data on stdout.
 
@@ -108,3 +103,15 @@ fussy-git status @payments
 fussy-git exec @payments -- git switch main
 fussy-git list @payments --json
 ```
+
+## Removed keys
+
+These keys are still accepted so that older configs load, but they do nothing,
+and fussy-git warns on stderr until you remove them:
+
+| Key                    | Why                                                                 |
+| ---------------------- | ------------------------------------------------------------------ |
+| `fork`                 | The fork workflow was never implemented.                            |
+| `worktree_root`        | `worktree add` was removed ([details](./commands/worktree.md)). |
+| `hooks.post_worktree`  | Same reason; use your worktree tool's hooks, such as Worktrunk's `post-start`. |
+| `hooks.post_reconcile` | It never ran. Use `hooks.post_move`.                                 |

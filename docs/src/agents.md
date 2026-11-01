@@ -1,19 +1,19 @@
 # Using fussy-git with coding agents
 
-Coding agents such as Claude Code read other repositories, work on several
-branches at once, and make changes that span services. Without a convention
-they clone into `/tmp` or the current project, and put worktrees wherever they
-happen to choose. fussy-git gives them one convention, and gives them
-machine-readable output to work with.
+Coding agents such as Claude Code read other repositories and make changes
+that span services. Without a convention they clone into `/tmp` or the current
+project. fussy-git gives them one place for every repository, and
+machine-readable output to work with. For running several agents on branches
+of one repository, pair it with [Worktrunk](./worktrunk.md).
 
 ## The Claude Code plugin
 
 The repository ships a Claude Code plugin with two parts:
 
 - A **skill** that tells Claude how to use fussy-git: `get` instead of
-  `git clone`, `info` to orient itself, `worktree add` for parallel work, `exec`
-  for multi-repository changes, and plan-then-apply for anything that moves
-  files.
+  `git clone`, `info` to orient itself, `exec` for multi-repository changes,
+  plan-then-apply for anything that moves files, and `wt` (when installed) for
+  parallel work on branches.
 - A **`PreToolUse` hook** that blocks `git clone` in Bash and replies with the
   equivalent `fussy-git get` command, keeping `--branch` and `--depth`. Claude
   sees the message and retries correctly. To allow one deliberate clone
@@ -92,5 +92,8 @@ anything.
 `get` clones into a hidden sibling directory and renames it into place. Two
 agents fetching the same repository at once both end up with the one checkout,
 and a failed clone leaves nothing half-written. The index cache is written
-atomically. `worktree add` gives each agent its own branch checkout at a
-predictable path, and `worktree prune` cleans them up after the work is merged.
+atomically.
+
+For several agents on *one* repository, give each its own worktree with
+Worktrunk or `claude --worktree`. `fussy-git worktree list` shows them all
+across your repositories, and `fussy-git cd api@<branch>` jumps to one.

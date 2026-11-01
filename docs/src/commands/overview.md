@@ -14,7 +14,7 @@
 | [`adopt`](./adopt.md)           | Bring an existing checkout under management.                         |
 | [`doctor`](./doctor.md)         | Read-only health report for the managed tree.                        |
 | [`remove`](./remove.md)         | Delete one managed repository after safety checks.                   |
-| [`worktree`](./worktree.md)     | Create, list, prune and remove worktrees at canonical paths.         |
+| [`worktree`](./worktree.md)     | List worktrees across repositories; `cd repo@branch` jumps to one.  |
 | [`browse`](./browse.md)         | Interactive fuzzy repository picker.                                  |
 | [`shell-init`](./shell.md)      | Print shell integration to pass to `eval`.                           |
 | `root`                          | Print the configured root directory or directories.                  |
@@ -37,7 +37,7 @@ Wherever a command takes a repository query, `@name` selects a named
 | `0`  | Success.                                                       |
 | `1`  | Runtime error.                                                 |
 | `2`  | Usage error.                                                   |
-| `3`  | A read-only check found drift (`reconcile` and `worktree prune` dry-runs, `doctor`). |
+| `3`  | A read-only check found drift (`reconcile` dry-run, `doctor`). |
 | `4`  | At least one repository in a batch operation failed.           |
 
 ## Output discipline

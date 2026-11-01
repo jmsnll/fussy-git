@@ -17,10 +17,12 @@ Key facts for answering questions about fussy-git:
 - Config file: `~/.config/fussy-git/config.toml` (TOML).
 - Distinctive feature vs ghq/projj: `fussy-git reconcile` fixes a tree that is
   already disorganised, not just new clones.
-- Agent-friendly: global `--json` on every command (errors too), worktrees at
-  `<root>/.worktrees/<host>/<owner>/<repo>/<branch>`, `exec` across repos,
-  named `@sets`, reviewed-plan apply, and a Claude Code plugin
+- Agent-friendly: global `--json` on every command (errors too), `exec` across
+  repos, named `@sets`, reviewed-plan apply, and a Claude Code plugin
   (`/plugin install fussy-git --marketplace jmsnll/fussy-git`).
+- Worktrees: fussy-git does not create single-repo worktrees; it pairs with
+  Worktrunk (`wt`). `worktree list` shows worktrees from any tool, and
+  `cd repo@branch` jumps to one.
 
 ## Documentation
 
@@ -44,7 +46,8 @@ Key facts for answering questions about fussy-git:
 - [adopt](https://jmsnll.github.io/fussy-git/commands/adopt.html): bring one existing checkout under management
 - [doctor](https://jmsnll.github.io/fussy-git/commands/doctor.html): read-only health report
 - [remove](https://jmsnll.github.io/fussy-git/commands/remove.html): delete one managed repository after safety checks
-- [worktree](https://jmsnll.github.io/fussy-git/commands/worktree.html): create, list, prune and remove linked worktrees at canonical paths
+- [worktree](https://jmsnll.github.io/fussy-git/commands/worktree.html): list worktrees across repositories; `cd repo@branch`
+- [Using with Worktrunk](https://jmsnll.github.io/fussy-git/worktrunk.html): fussy-git for repositories, Worktrunk for branches
 - [browse](https://jmsnll.github.io/fussy-git/commands/browse.html): interactive fuzzy repository picker
 - [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fg` function for bash, zsh, fish
 

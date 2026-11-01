@@ -11,9 +11,8 @@
 //! wrong.
 //!
 //! Exit codes: `0` success, `1` runtime error, `2` usage error (from clap),
-//! `3` drift found by a read-only check (`reconcile` dry-run, `doctor`,
-//! `worktree prune` dry-run), `4` partial failure across a batch of
-//! repositories.
+//! `3` drift found by a read-only check (`reconcile` dry-run, `doctor`),
+//! `4` partial failure across a batch of repositories.
 
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -104,7 +103,7 @@ enum Command {
     Remove(RemoveArgs),
     /// Report on the health of the managed tree without changing anything.
     Doctor(DoctorArgs),
-    /// Create, list, prune and remove linked worktrees at canonical paths.
+    /// List linked worktrees across repositories, whichever tool made them.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
     /// Interactive repository browser.
@@ -245,41 +244,29 @@ struct DoctorArgs {
 
 #[derive(Subcommand)]
 enum WorktreeCmd {
-    /// Create a worktree for BRANCH at `<worktree_root>/<host>/<owner>/<repo>/<branch>`
-    /// and print its path. Reuses an existing worktree for the branch.
-    Add {
-        /// The repository: a query, or a path such as `.`.
-        repo: String,
-        branch: String,
-        /// Start a new branch from this revision instead of the default branch.
-        #[arg(long)]
-        base: Option<String>,
-    },
-    /// List linked worktrees across repositories.
+    /// List linked worktrees across repositories: Worktrunk's, Claude Code's
+    /// or plain `git worktree`'s. Jump to one with `fussy-git cd repo@branch`.
     List {
         /// Case-insensitive substring filter on the repository path, or `@set`.
         query: Option<String>,
     },
-    /// Remove worktrees whose directory is gone, whose branch is merged, or
-    /// whose upstream was deleted. A dry-run unless `--apply`.
-    Prune {
-        /// Case-insensitive substring filter on the repository path, or `@set`.
-        query: Option<String>,
-        /// Remove the candidates.
-        #[arg(long)]
-        apply: bool,
-        /// Also consider worktrees outside `worktree_root`.
-        #[arg(long)]
-        all: bool,
+    /// Removed in 0.3.0; use Worktrunk (`wt switch -c`) or `git worktree add`.
+    #[command(hide = true)]
+    Add {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        _args: Vec<String>,
     },
-    /// Remove one linked worktree (the branch is kept).
+    /// Removed in 0.3.0; use `wt remove` or `git worktree prune`.
+    #[command(hide = true)]
+    Prune {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        _args: Vec<String>,
+    },
+    /// Removed in 0.3.0; use `wt remove` or `git worktree remove`.
+    #[command(hide = true)]
     Remove {
-        /// A path inside the worktree. Defaults to the current directory.
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Remove even with uncommitted changes.
-        #[arg(long)]
-        force: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        _args: Vec<String>,
     },
 }
 
@@ -354,6 +341,9 @@ fn run(command: Command, format: Format) -> Result<ExitCode> {
         return cmd_pre_tool_use();
     }
     let cfg = Config::load().context("loading configuration")?;
+    for w in &cfg.warnings {
+        eprintln!("{} {w}", ui::warn_prefix());
+    }
 
     match command {
         Command::Get(a) => cmd_get(&cfg, a, format),
@@ -384,7 +374,6 @@ fn run(command: Command, format: Format) -> Result<ExitCode> {
                 ui::print_json(&serde_json::json!({
                     "root": cfg.root,
                     "roots": cfg.roots,
-                    "worktree_root": cfg.worktree_root,
                 }))?;
             } else {
                 for root in &cfg.roots {
@@ -665,6 +654,13 @@ fn cmd_remove(cfg: &Config, a: RemoveArgs, format: Format) -> Result<ExitCode> {
         for blocker in &plan.blockers {
             eprintln!("  {} {blocker}", ui::warn_prefix());
         }
+        for wt in &plan.worktrees {
+            eprintln!(
+                "  {} linked worktree: {} (blocks removal)",
+                ui::warn_prefix(),
+                wt.display()
+            );
+        }
     }
     if a.dry_run {
         report(false)?;
@@ -689,19 +685,13 @@ fn cmd_doctor(cfg: &Config, a: DoctorArgs, format: Format) -> Result<ExitCode> {
 }
 
 fn cmd_worktree(cfg: &Config, cmd: WorktreeCmd, format: Format) -> Result<ExitCode> {
+    let removed = |what: &str, instead: &str| -> Result<ExitCode> {
+        anyhow::bail!(
+            "`fussy-git worktree {what}` was removed in 0.3.0: single-repository worktrees \
+             are left to tools built for them. Use {instead}."
+        )
+    };
     match cmd {
-        WorktreeCmd::Add { repo, branch, base } => {
-            let added = worktree::add(cfg, &repo, &branch, base.as_deref())?;
-            if format.is_json() {
-                ui::print_json(&added)?;
-            } else {
-                if !added.created {
-                    eprintln!("{}", ui::note("reusing the existing worktree"));
-                }
-                println!("{}", added.path.display());
-            }
-            Ok(ExitCode::SUCCESS)
-        }
         WorktreeCmd::List { query } => {
             let wts = worktree::list(cfg, query.as_deref())?;
             if format.is_json() {
@@ -711,36 +701,9 @@ fn cmd_worktree(cfg: &Config, cmd: WorktreeCmd, format: Format) -> Result<ExitCo
             }
             Ok(ExitCode::SUCCESS)
         }
-        WorktreeCmd::Prune { query, apply, all } => {
-            let report = worktree::prune(cfg, &worktree::PruneOptions { apply, all, query })?;
-            if format.is_json() {
-                ui::print_json(&report)?;
-            } else {
-                print_prune(cfg, &report);
-            }
-            Ok(if !report.failed.is_empty() {
-                ExitCode::from(EXIT_PARTIAL)
-            } else if !apply && !report.candidates.is_empty() {
-                ExitCode::from(EXIT_DRIFT)
-            } else {
-                ExitCode::SUCCESS
-            })
-        }
-        WorktreeCmd::Remove { path, force } => {
-            let removed = worktree::remove(cfg, &path, force)?;
-            if format.is_json() {
-                ui::print_json(&removed)?;
-            }
-            eprintln!(
-                "{}",
-                ui::note(&format!(
-                    "removed worktree {} (branch {} kept)",
-                    removed.path.display(),
-                    removed.branch.as_deref().unwrap_or("none")
-                ))
-            );
-            Ok(ExitCode::SUCCESS)
-        }
+        WorktreeCmd::Add { .. } => removed("add", "`wt switch -c <branch>` or `git worktree add`"),
+        WorktreeCmd::Prune { .. } => removed("prune", "`wt remove` or `git worktree prune`"),
+        WorktreeCmd::Remove { .. } => removed("remove", "`wt remove` or `git worktree remove`"),
     }
 }
 
@@ -763,12 +726,6 @@ fn print_worktrees(cfg: &Config, wts: &[worktree::Worktree]) {
         if w.dirty == Some(true) {
             state.push(ui::warn("dirty"));
         }
-        if w.merged {
-            state.push(ui::ok("merged"));
-        }
-        if w.upstream_gone {
-            state.push(ui::warn("upstream gone"));
-        }
         if w.locked {
             state.push(ui::dim("locked"));
         }
@@ -780,45 +737,6 @@ fn print_worktrees(cfg: &Config, wts: &[worktree::Worktree]) {
             state.join(", ")
         );
         println!("{}", line.trim_end());
-    }
-}
-
-fn print_prune(cfg: &Config, r: &worktree::PruneReport) {
-    let verb = if r.applied { "removed" } else { "prune" };
-    for c in &r.candidates {
-        if r.applied && !r.removed.contains(&c.worktree.path) {
-            continue;
-        }
-        println!(
-            "  {:<8} {}   {}",
-            ui::accent(verb),
-            ui::repo_name(cfg, &c.worktree.path),
-            ui::dim(&c.reason.to_string())
-        );
-    }
-    for b in &r.deleted_branches {
-        println!("  {:<8} branch {b}", ui::ok("deleted"));
-    }
-    for p in &r.protected {
-        println!(
-            "  {:<8} {}   {}",
-            ui::dim("keep"),
-            ui::repo_name(cfg, &p.path),
-            ui::dim(&p.reason)
-        );
-    }
-    for f in &r.failed {
-        println!(
-            "  {:<8} {}   {}",
-            ui::danger("failed"),
-            ui::repo_name(cfg, &f.path),
-            ui::dim(&f.error)
-        );
-    }
-    if r.candidates.is_empty() {
-        println!("nothing to prune");
-    } else if !r.applied {
-        println!("\nrun with --apply to remove these worktrees");
     }
 }
 

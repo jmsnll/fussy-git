@@ -14,7 +14,7 @@ It reports repositories that are:
 - **broken** — no readable `.git`, or no usable remote
 - **detached** — `HEAD` not on a branch
 - **stale** — last commit older than `--stale`, when given
-- **prunable worktrees** — worktrees [`worktree prune`](./worktree.md) would remove
+- **broken worktrees** — linked [worktrees](./worktree.md) whose directory was deleted, whichever tool made them
 
 | Flag       | Meaning                                                       |
 | ---------- | --------------------------------------------------------- |

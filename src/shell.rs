@@ -8,7 +8,7 @@
 //! * with arguments it runs `cd "$(fussy-git cd "$@")"`.
 //!
 //! `cd_target` is the unambiguous resolver behind `fussy-git cd`: exactly one
-//! match or it errors. Disambiguation is the shell function's job (via `fzf` /
+//! match or it errors. `repo@branch` selects that branch's worktree. Disambiguation is the shell function's job (via `fzf` /
 //! `browse`), not `cd`'s.
 
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ use anyhow::{bail, Result};
 use crate::config::Config;
 use crate::query::{self, Candidate};
 use crate::scan;
+use crate::worktree;
 
 /// A shell that fussy-git can emit an integration snippet for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +92,8 @@ end
 /// `query` is matched case-insensitively as a substring of each repo's
 /// `host/owner/repo` slug and of its `owner/repo` project path. Zero matches or
 /// more than one is a [`query::MatchError`] (the latter carries the candidates).
+/// Linked worktrees are never candidates; `repo@branch` resolves to the
+/// checkout of that branch instead (see [`worktree::resolve`]).
 ///
 /// Note: this walks the filesystem via [`scan::scan`]; a future revision may
 /// serve it from the index module for speed.
@@ -100,8 +103,16 @@ pub fn cd_target(cfg: &Config, query: &str) -> Result<PathBuf> {
         bail!("empty query");
     }
 
+    if let Some((repo_query, branch)) = worktree::split_branch(query) {
+        let repo = cd_target(cfg, repo_query)?;
+        return worktree::resolve(&repo, branch);
+    }
+
     let mut matches: Vec<Candidate> = Vec::new();
     for d in scan::scan(cfg)? {
+        if d.class == scan::Class::LinkedWorktree {
+            continue;
+        }
         let (slug, project) = match &d.identity {
             Some(id) => (id.to_string(), id.project_path()),
             None => {
@@ -200,5 +211,28 @@ mod tests {
         assert!(err.contains("github.com/rust-lang/rust"), "{err}");
         assert!(err.contains("github.com/rust-lang/cargo"), "{err}");
         assert!(err.contains("matches 2 repositories"), "{err}");
+    }
+
+    #[test]
+    fn sibling_worktrees_do_not_make_cd_ambiguous_and_at_branch_selects_them() {
+        let (_tmp, cfg) = tree();
+        let rust = cfg.root.join("github.com/rust-lang/rust");
+        // Worktrunk's default layout: `<repo>.<branch>` beside the repository.
+        let wt = cfg.root.join("github.com/rust-lang/rust.fix-ice");
+        crate::testutil::add_worktree(&rust, &wt, "fix/ice");
+
+        let real = crate::query::real;
+        assert_eq!(
+            real(&cd_target(&cfg, "rust-lang/rust").unwrap()),
+            real(&rust)
+        );
+        assert_eq!(
+            real(&cd_target(&cfg, "rust-lang/rust@fix-ice").unwrap()),
+            real(&wt)
+        );
+        assert_eq!(
+            real(&cd_target(&cfg, "rust-lang/rust@main").unwrap()),
+            real(&rust)
+        );
     }
 }

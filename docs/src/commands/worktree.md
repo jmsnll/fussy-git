@@ -1,76 +1,57 @@
 # worktree
 
 ```text
-fussy-git worktree add <REPO> <BRANCH> [--base <REV>]
-fussy-git worktree list [QUERY]
-fussy-git worktree prune [QUERY] [--apply] [--all]
-fussy-git worktree remove [PATH] [--force]
+fussy-git worktree list [QUERY | @set]
+fussy-git cd <QUERY>@<BRANCH>
 ```
 
-Linked worktrees at predictable paths. `fussy-git` already derives every clone's
-path from its identity, and worktrees get the same treatment:
+fussy-git decides where *repositories* live. Creating, switching, merging and
+removing worktrees within one repository is left to tools built for it:
+[Worktrunk](../worktrunk.md) (`wt`), Claude Code's `--worktree`, or plain
+`git worktree`. fussy-git adds the view across every repository, whichever tool
+made the worktrees.
 
-```text
-<worktree_root>/<host>/<owner>/<repo>/<branch>
-~/git/.worktrees/github.com/acme/api/feat-login
-```
-
-`worktree_root` defaults to `<root>/.worktrees`. It is a dot-directory, so
-`scan` never mistakes a worktree for a stray clone. A `/` in a branch name
-becomes `-`. This is the command to use when several sessions, or several
-coding agents, need to work on one repository at the same time.
-
-## add
-
-Create a worktree for `BRANCH` and print its path.
-
-- `REPO` is a query (`acme/api`) or a path. Use `.` for the repository you are
-  in; from inside a worktree, `.` still means the owning repository.
-- An existing local branch is checked out. A branch that exists only on
-  `origin` is created tracking it. Any other name becomes a new branch, started
-  from `--base` or the default branch (`origin/HEAD`, falling back to `main` or
-  `master`), with **no upstream**, so `git push -u` sets one when you are ready.
-- Running it again for the same branch returns the existing worktree, wherever
-  it is.
-- `hooks.post_worktree` runs in each new worktree, so it is the place for
-  `npm ci` or copying a `.env`.
-
-```sh
-cd "$(fussy-git worktree add . feat/login)"
-fussy-git worktree add acme/api hotfix --base origin/release --json
-```
+Feature workspaces are planned for a later release: one folder holding a
+worktree of each repository involved in a cross-repository change, for example
+an app plus its puppet and terraform repositories.
 
 ## list
 
-Every linked worktree across your repositories, with its branch and state:
-`missing`, `dirty`, `merged`, `upstream gone`, `locked`. `QUERY` and `@set`
-filter repositories the same way as [`status`](./bulk.md).
+Every linked worktree of your repositories, wherever it is on disk, with its
+branch and state: `missing`, `dirty`, `locked`. `QUERY` and `@set` filter
+repositories the same way as [`status`](./bulk.md). With `--json`, each element
+is `{repo, repo_path, path, branch, head, locked, missing, dirty}`.
 
-## prune
+## Jumping to a branch
 
-Clean up what parallel work leaves behind. A worktree is a candidate when:
+`fussy-git cd api@feat-auth` prints the checkout that has `feat-auth` checked
+out, and the `fg` shell function uses it, so `fg api@feat-auth` takes you
+there. Other cases:
 
-| Reason            | Meaning                                                            |
-| ----------------- | ------------------------------------------------------------------ |
-| directory missing | It was deleted by hand; only git's bookkeeping remains.             |
-| branch merged     | The branch has commits of its own, and all of them are in the default branch (on the remote or locally). |
-| upstream deleted  | The branch's upstream was deleted on the remote, which usually means its pull request was merged. |
+- `api@main` is the main clone when `main` is checked out there.
+- `/` and `-` are interchangeable, so `api@feat-auth` finds the branch
+  `feat/auth`, matching how Worktrunk names its directories.
+- If no checkout has the branch, the error lists the branches that are checked
+  out. It never creates a worktree: use `wt switch -c <branch>` for that.
 
-A worktree with uncommitted changes, or a locked one, is listed as protected and
-never removed. A branch that was created but never committed to is not treated
-as merged, even though it is an ancestor of the default branch.
+## Worktrees inside the root
 
-Like [`reconcile`](./reconcile.md), **prune is a dry run unless you pass
-`--apply`**, and it exits `3` when it finds candidates. Applying removes each
-worktree with `git worktree remove`, which refuses dirty trees. After that it
-deletes *merged* branches with `git branch -d`. An upstream-gone branch is kept,
-because a squash-merged or abandoned branch may hold commits nothing else has.
+Worktrunk's default layout puts worktrees beside the repository, for example
+`~/git/github.com/acme/api.feat-auth`. fussy-git recognises these as worktrees
+of `api`, not as repositories of their own. `list`, `cd` and `fg` don't offer
+them, and `reconcile` and `doctor` don't count them.
 
-By default only worktrees under `worktree_root` are considered (missing ones are
-always considered). `--all` includes worktrees made elsewhere.
+[`doctor`](./doctor.md) reports **broken worktrees**, meaning ones whose
+directory was deleted by hand. Clean them up with `wt remove` or
+`git worktree prune`.
 
-## remove
+`reconcile` and `remove` won't touch a repository that has linked worktrees,
+because moving or deleting it would break them, and `remove --force` doesn't
+override this. Remove the worktrees first.
 
-Remove the worktree containing `PATH` (default: the current directory). The
-branch is kept. git refuses if there are uncommitted changes, unless you pass
-`--force`.
+## Removed in 0.3.0
+
+`worktree add`, `worktree prune` and `worktree remove`, along with the
+`worktree_root` setting and the `post_worktree` hook, were removed in 0.3.0. The
+commands now exit with a pointer to the replacement, and the old config keys
+are still accepted, with a warning.

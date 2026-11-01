@@ -74,8 +74,8 @@ pub struct Findings {
     pub broken: Vec<PathBuf>,
     pub detached: Vec<Detached>,
     pub stale: Vec<Stale>,
-    /// Worktrees `fussy-git worktree prune` would remove.
-    pub worktrees: Vec<worktree::PruneCandidate>,
+    /// Linked worktrees whose directory is gone, whichever tool made them.
+    pub broken_worktrees: Vec<worktree::Worktree>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,7 +114,7 @@ impl Findings {
             && self.broken.is_empty()
             && self.detached.is_empty()
             && self.stale.is_empty()
-            && self.worktrees.is_empty()
+            && self.broken_worktrees.is_empty()
     }
 
     /// `0` when the tree is clean, `3` when any issue was found.
@@ -207,7 +207,10 @@ pub fn collect(cfg: &config::Config, opts: &DoctorOptions) -> Result<Findings> {
         .collect();
     f.duplicates = plan.duplicates;
     f.collisions = plan.collisions;
-    f.worktrees = worktree::prune(cfg, &worktree::PruneOptions::default())?.candidates;
+    f.broken_worktrees = worktree::list(cfg, None)?
+        .into_iter()
+        .filter(|w| w.missing)
+        .collect();
     Ok(f)
 }
 
@@ -353,26 +356,30 @@ fn render(cfg: &config::Config, f: &Findings) -> String {
         summary.push(format!("{} stale", f.stale.len()));
     }
 
-    if !f.worktrees.is_empty() {
+    if !f.broken_worktrees.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("prunable worktrees ({})", f.worktrees.len()))
+            ui::warn(&format!("broken worktrees ({})", f.broken_worktrees.len()))
         );
-        for c in &f.worktrees {
+        for w in &f.broken_worktrees {
             let _ = writeln!(
                 sections,
                 "    {}   {}",
-                ui::repo_name(cfg, &c.worktree.path),
-                ui::dim(&c.reason.to_string())
+                ui::repo_name(cfg, &w.path),
+                ui::dim(&format!(
+                    "{} of {}: directory missing",
+                    w.branch.as_deref().unwrap_or("detached"),
+                    w.repo
+                ))
             );
         }
         let _ = writeln!(
             sections,
             "    {}",
-            ui::dim("run `fussy-git worktree prune --apply` to remove them")
+            ui::dim("clean up with `wt remove` or `git worktree prune` in the repository")
         );
-        summary.push(format!("{} prunable worktree(s)", f.worktrees.len()));
+        summary.push(format!("{} broken worktree(s)", f.broken_worktrees.len()));
     }
 
     let total = f.checked;

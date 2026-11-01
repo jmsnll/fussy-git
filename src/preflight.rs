@@ -60,7 +60,8 @@ impl Safety {
         }
         if !self.linked_worktrees.is_empty() {
             out.push(format!(
-                "{} linked worktree(s) reference this path",
+                "{} linked worktree(s) reference this path (see `fussy-git worktree list`; \
+                 remove them with `wt remove` or `git worktree remove` first)",
                 self.linked_worktrees.len()
             ));
         }

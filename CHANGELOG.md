@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+fussy-git decides where repositories live and works across many of them. It
+now leaves single-repository worktrees to tools built for them, such as
+[Worktrunk](https://worktrunk.dev) and Claude Code's `--worktree`.
+
+### Added
+
+- `cd repo@branch`, and therefore `fg repo@branch`, jumps to the checkout of
+  that branch: the main clone or a linked worktree made by any tool. `/` and `-`
+  are interchangeable, matching Worktrunk's directory names.
+- `doctor` reports broken worktrees, meaning worktrees whose directory was
+  deleted.
+- A "Using with Worktrunk" guide.
+- Config warnings: keys that are accepted but do nothing are reported on
+  stderr.
+
+### Changed
+
+- Linked worktrees are no longer treated as repositories. Worktrunk's default
+  layout (`api.feat-auth` beside `api`) previously made `cd api` ambiguous and
+  listed worktrees as repos. The index cache format changes, and the cache
+  rebuilds itself automatically.
+- `worktree list` is read-only and reports worktrees from any tool.
+- The Claude Code plugin skill points to `wt` or `claude --worktree` for
+  parallel branches.
+
+### Removed
+
+- `worktree add`, `worktree prune` and `worktree remove`. These now exit with
+  a pointer to `wt` or `git worktree`.
+- The config keys `worktree_root`, `hooks.post_worktree`, `fork` (never
+  implemented) and `hooks.post_reconcile` (never ran). They are still accepted,
+  with a warning.
+
+### Fixed
+
+- `remove --force` no longer deletes a repository that has linked worktrees.
+  Before this fix, the worktrees were left pointing at a deleted git directory.
+
 ## [0.2.0] - 2026-11-01
 
 Support for agent-driven workflows.

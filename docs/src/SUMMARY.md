@@ -6,6 +6,7 @@
 - [Getting started](./getting-started.md)
 - [Configuration](./configuration.md)
 - [Using with coding agents](./agents.md)
+- [Using with Worktrunk](./worktrunk.md)
 
 # Commands
 

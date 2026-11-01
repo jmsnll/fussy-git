@@ -9,8 +9,12 @@ query must resolve to a single repository (a case-insensitive substring of
 `host/owner/repo`).
 
 Before deleting, `remove` checks for blockers — uncommitted changes, unpushed
-commits, stashes, linked worktrees — and reports them. With blockers and no
-`--force`, it refuses before asking anything.
+commits, stashes — and reports them. With blockers and no `--force`, it refuses
+before asking anything.
+
+A repository with linked worktrees is never removed, even with `--force`,
+because the worktrees would be left pointing at a deleted git directory. Remove
+them first with `wt remove` or `git worktree remove`.
 
 | Flag           | Meaning                                                       |
 | -------------- | --------------------------------------------------------- |
