@@ -9,6 +9,7 @@ pub mod bulk;
 pub mod config;
 pub mod doctor;
 pub mod exec;
+pub mod feature;
 pub mod fsops;
 pub mod get;
 pub mod git;

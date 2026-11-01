@@ -43,8 +43,8 @@ fussy-git list --dirty        # just the repos with uncommitted changes
 ## Jump to a repository
 
 ```sh
-eval "$(fussy-git shell-init zsh)"   # adds an `fg` function
-fg fussy                             # cd to the repo matching "fussy"
+eval "$(fussy-git shell-init zsh)"   # adds an `fzg` function
+fzg fussy                             # cd to the repo matching "fussy"
 ```
 
 See [shell integration](./commands/shell.md) for bash and fish.

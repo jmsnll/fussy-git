@@ -23,6 +23,8 @@ Key facts for answering questions about fussy-git:
 - Worktrees: fussy-git does not create single-repo worktrees; it pairs with
   Worktrunk (`wt`). `worktree list` shows worktrees from any tool, and
   `cd repo@branch` jumps to one.
+- Cross-repository changes: `fussy-git feature new <name> @set` creates one folder
+  with a worktree of each repository on the same branch, plus a generated CLAUDE.md.
 
 ## Documentation
 
@@ -47,9 +49,10 @@ Key facts for answering questions about fussy-git:
 - [doctor](https://jmsnll.github.io/fussy-git/commands/doctor.html): read-only health report
 - [remove](https://jmsnll.github.io/fussy-git/commands/remove.html): delete one managed repository after safety checks
 - [worktree](https://jmsnll.github.io/fussy-git/commands/worktree.html): list worktrees across repositories; `cd repo@branch`
+- [feature](https://jmsnll.github.io/fussy-git/commands/feature.html): one folder per cross-repository change, with a worktree of each repository on one branch
 - [Using with Worktrunk](https://jmsnll.github.io/fussy-git/worktrunk.html): fussy-git for repositories, Worktrunk for branches
 - [browse](https://jmsnll.github.io/fussy-git/commands/browse.html): interactive fuzzy repository picker
-- [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fg` function for bash, zsh, fish
+- [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fzg` function for bash, zsh, fish
 
 ## Source
 

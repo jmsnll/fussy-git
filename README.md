@@ -63,8 +63,9 @@ fussy-git status
 fussy-git pull
 
 # Jump to a repository
-eval "$(fussy-git shell-init zsh)"    # adds an `fg` function
-fg fussy                              # cd to the repo matching "fussy"
+eval "$(fussy-git shell-init zsh)"    # adds an `fzg` function
+fzg fussy                             # cd to the repo matching "fussy"
+fzg fussy@my-branch                   # cd to the checkout of that branch
 ```
 
 ## Configuration
@@ -120,9 +121,10 @@ Template placeholders: `{host}`, `{owner}`, `{group_path}` (an alias for
 | `adopt <path>` | Move an existing checkout to its canonical path. `--as host/owner/repo` for a repository with no usable remote. |
 | `remove <query>` | Delete one managed repository after checking for unsaved work. `--force`, `--yes`, `--dry-run`. |
 | `worktree list` | Linked worktrees across repositories, whichever tool made them. `cd repo@branch` jumps to one. |
+| `feature new\|list\|path\|status\|exec\|done` | One folder per cross-repository change, holding a worktree of each repository on the same branch, for you or an agent to work in. |
 | `doctor` | Read-only health report: misplaced, duplicate, broken, detached, (with `--stale 90d`) stale repositories, and broken worktrees. |
 | `browse` | Full-screen fuzzy repository picker. |
-| `shell-init <bash\|zsh\|fish>` | Print the `fg` shell integration for `eval`. |
+| `shell-init <bash\|zsh\|fish>` | Print the `fzg` shell integration for `eval`. |
 | `root` | Print the configured root or roots. |
 | `hook pre-tool-use` | Claude Code hook that redirects `git clone` to `get`. |
 
@@ -154,7 +156,9 @@ fussy-git is built to be driven by coding agents as well as people: JSON output
 everywhere, plan-then-apply for anything that moves files, and concurrency-safe
 clones. For parallel work on branches it pairs with
 [Worktrunk](https://jmsnll.github.io/fussy-git/worktrunk.html): fussy-git
-decides where repositories live, `wt` manages the worktrees inside them. The repository
+decides where repositories live, `wt` manages the worktrees inside them. For a
+change that spans repositories, `fussy-git feature new sso @payments` gives an
+agent one folder with a worktree of each. The repository
 ships a Claude Code plugin containing a skill and a hook that redirects
 `git clone` to `fussy-git get`:
 

@@ -1,7 +1,7 @@
 {
   "name": "fussy-git",
-  "version": "0.2.0",
-  "description": "Teach Claude Code to use fussy-git: clone other repositories into canonical paths, find repositories and worktrees, and act across many repositories with structured JSON output.",
+  "version": "0.3.0",
+  "description": "Teach Claude Code to use fussy-git: clone other repositories into canonical paths, work on changes that span repositories in one feature folder, and act across many repositories with structured JSON output.",
   "author": {
     "name": "James Neill"
   },

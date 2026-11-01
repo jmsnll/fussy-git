@@ -1,15 +1,17 @@
 //! `fussy-git shell-init <bash|zsh|fish>` and the `fussy-git cd <query>`
 //! resolver.
 //!
-//! `shell-init` emits a snippet defining an `fg` shell function:
+//! `shell-init` emits a snippet defining a jump function, `fzg` unless
+//! `--cmd` names another (the old `fg` hid the shell's job-control builtin):
 //!
 //! * with no arguments it pipes `fussy-git list --path` into `fzf` (falling back
 //!   to `fussy-git browse` when `fzf` is not installed) and `cd`s to the choice;
 //! * with arguments it runs `cd "$(fussy-git cd "$@")"`.
 //!
 //! `cd_target` is the unambiguous resolver behind `fussy-git cd`: exactly one
-//! match or it errors. `repo@branch` selects that branch's worktree. Disambiguation is the shell function's job (via `fzf` /
-//! `browse`), not `cd`'s.
+//! match or it errors. `repo@branch` selects that branch's worktree.
+//! Disambiguation is the shell function's job (via `fzf` / `browse`), not
+//! `cd`'s.
 
 use std::path::PathBuf;
 
@@ -38,54 +40,108 @@ pub fn parse_shell(s: &str) -> Result<Shell> {
     }
 }
 
-/// The shell integration script for `shell`, ready to pass to `eval` or `source`.
-pub fn init_script(shell: Shell) -> String {
+/// The jump function's name when `--cmd` is not given.
+pub const DEFAULT_CMD: &str = "fzg";
+
+/// Shell builtins and common commands a jump function must not shadow.
+const RESERVED: &[&str] = &[
+    "cd",
+    "fg",
+    "bg",
+    "jobs",
+    "ls",
+    "git",
+    "fussy-git",
+    "fzf",
+    "test",
+    "set",
+    "source",
+    "exec",
+    "eval",
+    "exit",
+    "return",
+    "local",
+    "type",
+    "command",
+    "builtin",
+    "alias",
+    "export",
+];
+
+/// A function name that is safe to define in every supported shell.
+pub fn validate_cmd(name: &str) -> Result<()> {
+    let valid = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if !valid {
+        bail!("--cmd {name:?}: use letters, digits, `_` and `-`, starting with a letter");
+    }
+    if RESERVED.contains(&name) {
+        bail!("--cmd {name:?} would shadow a shell builtin or command; pick another name");
+    }
+    Ok(())
+}
+
+/// The shell integration script for `shell`, defining the jump function
+/// `cmd`, ready to pass to `eval` or `source`.
+pub fn init_script(shell: Shell, cmd: &str) -> String {
     match shell {
-        Shell::Bash => posix_script("bash"),
-        Shell::Zsh => posix_script("zsh"),
-        Shell::Fish => FISH_SCRIPT.to_string(),
+        Shell::Bash => posix_script("bash", cmd),
+        Shell::Zsh => posix_script("zsh", cmd),
+        Shell::Fish => fish_script(cmd),
     }
 }
 
-fn posix_script(shell: &str) -> String {
+fn posix_script(shell: &str, cmd: &str) -> String {
     format!(
         r#"# fussy-git shell integration ({shell})
 # Enable with:  eval "$(fussy-git shell-init {shell})"
+#   {cmd} <query>          jump to a repository
+#   {cmd} <query>@<branch> jump to the checkout of a branch
+#   {cmd}                  pick one with fzf (or fussy-git browse)
 
-fg() {{
-    local _fg_dir
+{cmd}() {{
+    local _fzg_dir
     if [ "$#" -eq 0 ]; then
         if command -v fzf >/dev/null 2>&1; then
-            _fg_dir="$(fussy-git list --path | fzf)" || return
+            _fzg_dir="$(fussy-git list --path | fzf)" || return
         else
-            _fg_dir="$(fussy-git browse)" || return
+            _fzg_dir="$(fussy-git browse)" || return
         fi
     else
-        _fg_dir="$(fussy-git cd "$@")" || return
+        _fzg_dir="$(fussy-git cd "$@")" || return
     fi
-    [ -n "$_fg_dir" ] && cd "$_fg_dir"
+    [ -n "$_fzg_dir" ] && cd "$_fzg_dir"
 }}
 "#
     )
 }
 
-const FISH_SCRIPT: &str = r#"# fussy-git shell integration (fish)
+fn fish_script(cmd: &str) -> String {
+    format!(
+        r#"# fussy-git shell integration (fish)
 # Enable with:  fussy-git shell-init fish | source
 
-function fg --description 'jump to a fussy-git managed repository'
-    set -l _fg_dir
+function {cmd} --description 'jump to a fussy-git repository or worktree'
+    set -l _fzg_dir
     if test (count $argv) -eq 0
         if type -q fzf
-            set _fg_dir (fussy-git list --path | fzf)
+            set _fzg_dir (fussy-git list --path | fzf)
         else
-            set _fg_dir (fussy-git browse)
+            set _fzg_dir (fussy-git browse)
         end
     else
-        set _fg_dir (fussy-git cd $argv)
+        set _fzg_dir (fussy-git cd $argv)
     end
-    test -n "$_fg_dir"; and cd $_fg_dir
+    test -n "$_fzg_dir"; and cd $_fzg_dir
 end
-"#;
+"#
+    )
+}
 
 /// Resolve `query` to exactly one managed repository path.
 ///
@@ -168,16 +224,27 @@ mod tests {
     }
 
     #[test]
-    fn init_script_defines_fg_and_references_tool() {
+    fn init_script_defines_the_named_function_and_references_tool() {
         for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
-            let script = init_script(shell);
-            assert!(!script.is_empty());
-            assert!(script.contains("fg"), "{shell:?} missing fg");
+            let script = init_script(shell, DEFAULT_CMD);
             assert!(script.contains("fussy-git"), "{shell:?} missing fussy-git");
             assert!(script.contains("cd"), "{shell:?} missing cd");
+            assert!(!script.contains("\nfg()"), "{shell:?} must not define fg");
         }
-        assert!(init_script(Shell::Fish).contains("function fg"));
-        assert!(init_script(Shell::Bash).contains("fussy-git cd"));
+        assert!(init_script(Shell::Bash, "fzg").contains("\nfzg() {"));
+        assert!(init_script(Shell::Zsh, "j").contains("\nj() {"));
+        assert!(init_script(Shell::Fish, "fzg").contains("function fzg "));
+        assert!(init_script(Shell::Bash, "fzg").contains("fussy-git cd"));
+    }
+
+    #[test]
+    fn cmd_names_are_validated() {
+        assert!(validate_cmd("fzg").is_ok());
+        assert!(validate_cmd("j").is_ok());
+        assert!(validate_cmd("go-repo").is_ok());
+        for bad in ["fg", "cd", "", "1x", "a b", "x;rm", "$(x)"] {
+            assert!(validate_cmd(bad).is_err(), "{bad:?} should be rejected");
+        }
     }
 
     #[test]

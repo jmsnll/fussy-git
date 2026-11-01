@@ -26,8 +26,8 @@ use fussy_git::config::{self, Config};
 use fussy_git::query::MatchError;
 use fussy_git::ui::Format;
 use fussy_git::{
-    adopt, agent_hook, bulk, doctor, exec, get, index, info, list, reconcile, remove, scan, sets,
-    shell, tui, ui, worktree,
+    adopt, agent_hook, bulk, doctor, exec, feature, get, index, info, list, reconcile, remove,
+    scan, sets, shell, tui, ui, worktree,
 };
 
 /// A read-only check that found drift returns this so CI can gate on it.
@@ -106,10 +106,20 @@ enum Command {
     /// List linked worktrees across repositories, whichever tool made them.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
+    /// One folder per cross-repository change: a worktree of each repository
+    /// on the same branch, for people and agents to work in.
+    #[command(subcommand)]
+    Feature(FeatureCmd),
     /// Interactive repository browser.
     Browse,
-    /// Print shell integration to pass to `eval`.
-    ShellInit { shell: ShellArg },
+    /// Print shell integration to pass to `eval`: a jump function, `fzg` by
+    /// default (`fzg api`, `fzg api@branch`, `fzg` alone to pick).
+    ShellInit {
+        shell: ShellArg,
+        /// Name of the jump function to define.
+        #[arg(long, default_value = shell::DEFAULT_CMD)]
+        cmd: String,
+    },
     /// Print the configured root directory or directories.
     Root,
     /// Hooks for coding agents. See the docs for wiring them up.
@@ -271,6 +281,72 @@ enum WorktreeCmd {
 }
 
 #[derive(Subcommand)]
+enum FeatureCmd {
+    /// Create feature NAME with a worktree of each repository on one branch,
+    /// cloning any that are missing; or add repositories to an existing
+    /// feature. Checks every repository before creating anything. Prints the
+    /// feature folder.
+    New {
+        /// Folder name, and the branch name unless `--branch` is given.
+        name: String,
+        /// Repositories: `get` targets (`owner/repo`, URLs, …) or `@set`s.
+        repos: Vec<String>,
+        /// Branch to use in every repository, if not NAME.
+        #[arg(long)]
+        branch: Option<String>,
+        /// Start new branches from this revision instead of each
+        /// repository's default branch.
+        #[arg(long)]
+        base: Option<String>,
+        /// Check out a local branch that already exists instead of refusing.
+        #[arg(long)]
+        reuse: bool,
+        /// Declare an order: `--depends terraform=tf-modules,dns` (folder
+        /// names). Repeatable.
+        #[arg(long, value_name = "FOLDER=DEPS")]
+        depends: Vec<String>,
+    },
+    /// List features.
+    List,
+    /// Print the folder of a feature, or of one repository in it.
+    Path {
+        /// Defaults to the feature containing the current directory.
+        name: Option<String>,
+        /// A member folder, e.g. `api`.
+        member: Option<String>,
+    },
+    /// Branch, upstream, ahead/behind, dirty and unpushed for every
+    /// repository in a feature, dependencies first.
+    Status {
+        /// Defaults to the feature containing the current directory.
+        name: Option<String>,
+    },
+    /// Run a command in every repository of a feature, dependencies first.
+    Exec {
+        /// Defaults to the feature containing the current directory.
+        name: Option<String>,
+        #[arg(short, long)]
+        jobs: Option<usize>,
+        /// Per-repository timeout, in seconds.
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, required = true, value_name = "COMMAND")]
+        command: Vec<String>,
+    },
+    /// Remove a feature's worktrees (keeping every branch) and archive its
+    /// folder. Refuses, changing nothing, while any repository has
+    /// uncommitted changes or unpushed commits.
+    Done {
+        name: String,
+        /// Allow unpushed commits (e.g. squash-merged branches). Never
+        /// overrides uncommitted changes.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum HookCmd {
     /// Claude Code `PreToolUse` hook: block `git clone` in Bash and suggest
     /// `fussy-git get`. Reads the event JSON on stdin.
@@ -359,14 +435,16 @@ fn run(command: Command, format: Format) -> Result<ExitCode> {
         Command::Remove(a) => cmd_remove(&cfg, a, format),
         Command::Doctor(a) => cmd_doctor(&cfg, a, format),
         Command::Worktree(w) => cmd_worktree(&cfg, w, format),
+        Command::Feature(f) => cmd_feature(&cfg, f, format),
         Command::Browse => cmd_browse(&cfg),
-        Command::ShellInit { shell } => {
+        Command::ShellInit { shell, cmd } => {
+            shell::validate_cmd(&cmd)?;
             let s = match shell {
                 ShellArg::Bash => shell::Shell::Bash,
                 ShellArg::Zsh => shell::Shell::Zsh,
                 ShellArg::Fish => shell::Shell::Fish,
             };
-            print!("{}", shell::init_script(s));
+            print!("{}", shell::init_script(s, &cmd));
             Ok(ExitCode::SUCCESS)
         }
         Command::Root => {
@@ -737,6 +815,215 @@ fn print_worktrees(cfg: &Config, wts: &[worktree::Worktree]) {
             state.join(", ")
         );
         println!("{}", line.trim_end());
+    }
+}
+
+fn cmd_feature(cfg: &Config, cmd: FeatureCmd, format: Format) -> Result<ExitCode> {
+    match cmd {
+        FeatureCmd::New {
+            name,
+            repos,
+            branch,
+            base,
+            reuse,
+            depends,
+        } => {
+            let opts = feature::NewOptions {
+                branch,
+                base,
+                reuse,
+                depends: depends
+                    .iter()
+                    .map(|d| feature::parse_depends(d))
+                    .collect::<Result<_>>()?,
+            };
+            let report = feature::new(cfg, &name, &repos, &opts)?;
+            for w in &report.warnings {
+                eprintln!("{} {w}", ui::warn_prefix());
+            }
+            if format.is_json() {
+                ui::print_json(&report)?;
+            } else {
+                for m in &report.members {
+                    let state = match m.state {
+                        feature::MemberState::Created => ui::ok("created"),
+                        feature::MemberState::Existing => ui::dim("existing"),
+                        feature::MemberState::Failed => ui::danger("failed"),
+                    };
+                    eprintln!("  {:<10} {:<20} {}", state, m.dir, ui::dim(&m.identity));
+                    if let Some(e) = &m.error {
+                        if e.code != "not_planned" {
+                            eprintln!("             {}", e.message);
+                        }
+                    }
+                }
+            }
+            let failed = report.failed();
+            if failed == 0 {
+                if !format.is_json() {
+                    println!("{}", report.path.display());
+                }
+                Ok(ExitCode::SUCCESS)
+            } else if report
+                .members
+                .iter()
+                .any(|m| m.state != feature::MemberState::Failed)
+            {
+                Ok(ExitCode::from(EXIT_PARTIAL))
+            } else {
+                if !format.is_json() {
+                    eprintln!("nothing was created; fix the conflicts above and run it again");
+                }
+                Ok(ExitCode::from(1))
+            }
+        }
+        FeatureCmd::List => {
+            let features = feature::list(cfg)?;
+            if format.is_json() {
+                ui::print_json(&features)?;
+            } else if features.is_empty() {
+                eprintln!(
+                    "no features (create one with `fussy-git feature new <name> <@set | repo…>`)"
+                );
+            } else {
+                let w = features.iter().map(|f| f.name.len()).max().unwrap_or(0);
+                for f in &features {
+                    println!(
+                        "{:<w$}  {}  {}",
+                        f.name,
+                        ui::dim(&format!("branch {}", f.branch)),
+                        f.members.join(", ")
+                    );
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        FeatureCmd::Path { name, member } => {
+            let name = feature::resolve_name(cfg, name.as_deref())?;
+            let mut p = feature::path(cfg, &name);
+            if !p.join(feature::MANIFEST).is_file() {
+                anyhow::bail!("no feature named {name:?} (see `fussy-git feature list`)");
+            }
+            if let Some(m) = member {
+                p = p.join(m);
+                if !p.exists() {
+                    anyhow::bail!("{} does not exist", p.display());
+                }
+            }
+            if format.is_json() {
+                ui::print_json(&serde_json::json!({ "path": p }))?;
+            } else {
+                println!("{}", p.display());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        FeatureCmd::Status { name } => {
+            let name = feature::resolve_name(cfg, name.as_deref())?;
+            let st = feature::status(cfg, &name)?;
+            if format.is_json() {
+                ui::print_json(&st)?;
+            } else {
+                print_feature_status(&st);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        FeatureCmd::Exec {
+            name,
+            jobs,
+            timeout,
+            command,
+        } => {
+            let name = feature::resolve_name(cfg, name.as_deref())?;
+            let paths = feature::member_paths(cfg, &name)?;
+            if paths.is_empty() {
+                return no_repos(format);
+            }
+            let code = exec::run(
+                cfg,
+                paths,
+                command,
+                jobs.unwrap_or(cfg.jobs),
+                Duration::from_secs(timeout),
+                format,
+            )?;
+            Ok(ExitCode::from(code as u8))
+        }
+        FeatureCmd::Done { name, force } => {
+            let report = feature::done(cfg, &name, force)?;
+            if format.is_json() {
+                ui::print_json(&report)?;
+            } else {
+                for r in report.refused.iter().chain(&report.failed) {
+                    eprintln!(
+                        "  {} {}",
+                        ui::danger(&r.dir),
+                        ui::dim(&r.path.display().to_string())
+                    );
+                    for why in &r.reasons {
+                        eprintln!("      {why}");
+                    }
+                }
+                if let Some(a) = &report.archived_to {
+                    eprintln!(
+                        "{}",
+                        ui::note(&format!(
+                            "removed {} worktree(s); branches kept; folder archived to {}",
+                            report.removed.len(),
+                            a.display()
+                        ))
+                    );
+                } else if !report.refused.is_empty() {
+                    eprintln!("nothing was changed");
+                }
+            }
+            Ok(if report.refused.is_empty() && report.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else if report.removed.is_empty() {
+                ExitCode::from(1)
+            } else {
+                ExitCode::from(EXIT_PARTIAL)
+            })
+        }
+    }
+}
+
+fn print_feature_status(st: &feature::Status) {
+    println!(
+        "{}  {}",
+        ui::header(&st.name),
+        ui::dim(&format!("branch {} · {}", st.branch, st.path.display()))
+    );
+    let w = st.members.iter().map(|m| m.dir.len()).max().unwrap_or(0);
+    for m in &st.members {
+        let mut state = Vec::new();
+        match m.state {
+            feature::Health::Ok => {}
+            feature::Health::Missing => state.push(ui::danger("missing")),
+            feature::Health::WrongBranch => state.push(ui::warn(&format!(
+                "on {}",
+                m.branch.as_deref().unwrap_or("detached HEAD")
+            ))),
+        }
+        if m.dirty == Some(true) {
+            state.push(ui::warn("dirty"));
+        }
+        match (m.unpushed, &m.upstream) {
+            (Some(n), _) if n > 0 => state.push(ui::warn(&format!("{n} unpushed"))),
+            (_, None) if m.state != feature::Health::Missing => state.push(ui::dim("no upstream")),
+            _ => {}
+        }
+        if m.behind > 0 {
+            state.push(ui::warn(&format!("{} behind", m.behind)));
+        }
+        if state.is_empty() {
+            state.push(ui::ok("clean, pushed"));
+        }
+        let deps = if m.depends.is_empty() {
+            String::new()
+        } else {
+            ui::dim(&format!("  (after {})", m.depends.join(", ")))
+        };
+        println!("  {:<w$}  {}{deps}", m.dir, state.join(", "));
     }
 }
 

@@ -36,7 +36,7 @@ fussy-git cd <QUERY>
 
 Resolve a query to the path of the **single** matching repository and print it.
 Ambiguous or unmatched queries are an error. This is the primitive the
-[shell integration](./shell.md) is built on; most people use the `fg` function
+[shell integration](./shell.md) is built on; most people use the `fzg` function
 rather than calling `cd` directly.
 
 `QUERY@BRANCH` picks the checkout of that branch, which is either the main

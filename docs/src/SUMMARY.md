@@ -21,6 +21,7 @@
 - [doctor](./commands/doctor.md)
 - [remove](./commands/remove.md)
 - [worktree](./commands/worktree.md)
+- [feature](./commands/feature.md)
 - [browse](./commands/browse.md)
 - [shell integration](./commands/shell.md)
 

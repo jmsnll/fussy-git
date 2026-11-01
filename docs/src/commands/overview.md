@@ -15,6 +15,7 @@
 | [`doctor`](./doctor.md)         | Read-only health report for the managed tree.                        |
 | [`remove`](./remove.md)         | Delete one managed repository after safety checks.                   |
 | [`worktree`](./worktree.md)     | List worktrees across repositories; `cd repo@branch` jumps to one.  |
+| [`feature`](./feature.md)       | One folder per cross-repository change: a worktree of each repository. |
 | [`browse`](./browse.md)         | Interactive fuzzy repository picker.                                  |
 | [`shell-init`](./shell.md)      | Print shell integration to pass to `eval`.                           |
 | `root`                          | Print the configured root directory or directories.                  |

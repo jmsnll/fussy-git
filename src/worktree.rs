@@ -43,6 +43,8 @@ pub struct Worktree {
     pub missing: bool,
     /// Uncommitted changes; `None` when the directory is missing.
     pub dirty: Option<bool>,
+    /// The `fussy-git feature` this worktree belongs to, if any.
+    pub feature: Option<String>,
 }
 
 /// Every linked worktree of the repositories `query` selects (all of them when
@@ -73,6 +75,7 @@ fn inspect_repo(cfg: &Config, repo: &Path) -> Result<Vec<Worktree>> {
         .map(|e| {
             let missing = e.prunable || !e.path.exists();
             Worktree {
+                feature: crate::feature::feature_of(cfg, &e.path),
                 repo: name.clone(),
                 repo_path: repo.to_path_buf(),
                 dirty: if missing {
