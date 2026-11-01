@@ -94,6 +94,12 @@ agents fetching the same repository at once both end up with the one checkout,
 and a failed clone leaves nothing half-written. The index cache is written
 atomically.
 
+For a change that spans repositories, `fussy-git feature new <name> @set` gives
+the agent one folder with a worktree of each repository and a generated
+CLAUDE.md that lists them in dependency order. Start one lead agent at the
+folder's root. Remember that this isn't isolation: commits still land in the
+main clones' `.git`.
+
 For several agents on *one* repository, give each its own worktree with
 Worktrunk or `claude --worktree`. `fussy-git worktree list` shows them all
 across your repositories, and `fussy-git cd api@<branch>` jumps to one.

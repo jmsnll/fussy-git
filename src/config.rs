@@ -92,6 +92,9 @@ pub struct Config {
     /// Named groups of repositories (`[sets]`), addressed as `@name`. Each
     /// member is a `get` target: `owner/repo`, `host/owner/repo`, a URL, ….
     pub sets: BTreeMap<String, Vec<String>>,
+    /// Where `feature new` creates feature workspaces. Defaults to
+    /// `<root>/.features`, which `scan` skips as a dot-directory.
+    pub features_root: PathBuf,
     hosts: Vec<HostRule>,
     ignore_globs: Vec<String>,
     ignore_set: GlobSet,
@@ -115,6 +118,7 @@ impl Default for Config {
             on_collision: OnCollision::default(),
             hooks: Hooks::default(),
             sets: BTreeMap::new(),
+            features_root: default_root().join(".features"),
             hosts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_set: GlobSet::empty(),
@@ -221,6 +225,7 @@ struct RawConfig {
     worktree_root: Option<toml::Value>,
     #[serde(default)]
     sets: BTreeMap<String, Vec<String>>,
+    features_root: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,6 +291,11 @@ impl RawConfig {
 
         let ignore_set = build_glob_set(&self.ignore)?;
 
+        let features_root = match &self.features_root {
+            Some(f) => expand(f)?,
+            None => root.join(".features"),
+        };
+
         let mut warnings = Vec::new();
         let mut ignored = |key: &str, why: &str| {
             warnings.push(format!("config key `{key}` is ignored: {why}; remove it"))
@@ -333,6 +343,7 @@ impl RawConfig {
                 post_move: self.hooks.post_move,
             },
             sets: self.sets,
+            features_root,
             hosts,
             ignore_globs: self.ignore,
             ignore_set,

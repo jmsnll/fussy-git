@@ -1,6 +1,6 @@
 ---
 name: fussy-git
-description: Use whenever a task needs another git repository's source (a dependency, a sibling service, an upstream project), finding an existing checkout or worktree, or an action across several repositories (status, a search, a scripted change). Covers cloning with `fussy-git get` instead of `git clone`, finding repositories and worktrees, finding out where you are with `fussy-git info`, and running commands across repositories with `fussy-git exec`. Also use when the user mentions fussy-git, ~/git, or a named set like `@payments`.
+description: Use whenever a task needs another git repository's source (a dependency, a sibling service, an upstream project), finding an existing checkout or worktree, a change that spans several repositories (app, puppet, terraform, terraform modules…), or an action across several repositories (status, a search, a scripted change). Covers cloning with `fussy-git get` instead of `git clone`, finding repositories and worktrees, finding out where you are with `fussy-git info`, and running commands across repositories with `fussy-git exec`. Also use when the user mentions fussy-git, ~/git, or a named set like `@payments`.
 ---
 
 # fussy-git
@@ -63,6 +63,43 @@ fussy-git cd acme/api@feat-auth --json          # the checkout of that branch
 
 `/` and `-` are interchangeable in `repo@branch`. If the branch isn't checked
 out anywhere, the error lists the branches that are.
+
+## A change that spans several repositories
+
+When one change touches several repositories, work in a feature folder: one
+worktree of each repository, all on the same branch.
+
+```sh
+fussy-git feature new <name> @set [repo…] --depends terraform=tf-modules --json
+cd "$(fussy-git feature path <name>)"
+```
+
+- Start with `fussy-git feature status --json`. It lists the members in
+  dependency order, each with branch, upstream, ahead/behind, dirty and
+  unpushed.
+- **One writer per worktree.** Each member folder is its own repository.
+  Commit in each one separately.
+- **Push and open pull requests in dependency order.** That is the order
+  `status` lists, and it puts modules before their consumers. Link the pull
+  requests to each other in their descriptions.
+- **Cross-repository references are pinned.** Examples: a terraform
+  `source = "git::…?ref=v1.2"`, or a Puppetfile entry pinned by `:ref`. A
+  consumer does not see its sibling's branch until you point that reference at
+  the branch (for example `?ref=<branch>`). Before merging, point it back at a
+  released tag. Never commit a local `../` module source.
+- **Never** run `terraform apply` or a puppet deploy. Never switch branches or
+  create worktrees inside the feature folder. Never edit the main clones.
+- **To add a repository**, run `feature new <name> <repo>` again. It is
+  idempotent and extends the feature.
+- **If `new` reports errors**, each one has a `code`, for example
+  `branch_checked_out_elsewhere`, which comes with `other_path`. Nothing was
+  created; fix the cause and run it again.
+- **When finished**, run `fussy-git feature done <name>`. It refuses while
+  anything is uncommitted or unpushed, and that refusal is the safety check:
+  don't pass `--force` unless the user confirms the branches were
+  squash-merged.
+
+Feature worktrees are not isolated. Commits land in each main clone's `.git`.
 
 ## Across many repositories
 

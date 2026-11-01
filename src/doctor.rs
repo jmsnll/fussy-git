@@ -374,11 +374,13 @@ fn render(cfg: &config::Config, f: &Findings) -> String {
                 ))
             );
         }
-        let _ = writeln!(
-            sections,
-            "    {}",
-            ui::dim("clean up with `wt remove` or `git worktree prune` in the repository")
-        );
+        let hint = match f.broken_worktrees.iter().find_map(|w| w.feature.as_deref()) {
+            Some(name) => format!(
+                "recreate with `fussy-git feature new {name}`, or finish with `fussy-git feature done {name}`"
+            ),
+            None => "clean up with `wt remove` or `git worktree prune` in the repository".to_string(),
+        };
+        let _ = writeln!(sections, "    {}", ui::dim(&hint));
         summary.push(format!("{} broken worktree(s)", f.broken_worktrees.len()));
     }
 

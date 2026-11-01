@@ -15,6 +15,7 @@ jobs  = 12                            # concurrency for bulk operations
 default_host = "github.com"           # host for the bare `owner/repo` shorthand
 on_collision = "fail"                 # fail | suffix | skip
 ignore = ["**/node_modules/**", "~/git/scratch/**"]
+features_root = "~/git/.features"     # where `feature new` creates feature folders
 
 [hosts."github.com"]
 alias = ["gh", "github"]              # `fussy-git get gh:jmsnll/fussy-git`
@@ -44,6 +45,7 @@ payments = ["acme/api", "acme/web", "gl:acme/infra"]   # address as @payments
 | `default_template` | `{host}/{owner}/{repo}`  | Path template used for any host without its own `template`.      |
 | `on_collision`     | `fail`                   | What to do when two remotes map to one path: `fail`/`suffix`/`skip`. |
 | `ignore`           | `[]`                     | Glob patterns for paths `reconcile` and the index skip.          |
+| `features_root`    | `<root>/.features`       | Where [`feature new`](./commands/feature.md) creates feature folders. |
 
 ### Per-host `[hosts."<host>"]`
 

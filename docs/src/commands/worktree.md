@@ -11,9 +11,8 @@ removing worktrees within one repository is left to tools built for it:
 `git worktree`. fussy-git adds the view across every repository, whichever tool
 made the worktrees.
 
-Feature workspaces are planned for a later release: one folder holding a
-worktree of each repository involved in a cross-repository change, for example
-an app plus its puppet and terraform repositories.
+For a change that spans several repositories, [`feature`](./feature.md) creates
+one folder with a worktree of each.
 
 ## list
 

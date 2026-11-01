@@ -87,7 +87,8 @@ pub fn check(plan: &RemovePlan, force: bool) -> Result<()> {
     if !plan.worktrees.is_empty() {
         bail!(
             "refusing to remove {}: it has linked worktrees, which would be left broken:\n{}\n\
-             remove them first (`wt remove`, or `git worktree remove <path>`); --force does not override this",
+             remove them first (`fussy-git feature done <name>` for a feature's worktrees, otherwise \
+             `wt remove` or `git worktree remove <path>`); --force does not override this",
             plan.label(),
             plan.worktrees
                 .iter()

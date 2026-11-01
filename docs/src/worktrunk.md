@@ -55,6 +55,14 @@ Install both plugins. They don't overlap:
 fussy-git deliberately doesn't install a `WorktreeCreate` hook, so it never
 competes with Worktrunk's.
 
+## Changes across several repositories
+
+Worktrunk handles one repository at a time. When a change spans several
+(an app, its puppet code, terraform and terraform modules), use
+[`fussy-git feature`](./commands/feature.md). It gives you one folder with a
+worktree of each repository on the same branch. `wt list` and `wt merge` still
+work inside each of those worktrees.
+
 ## Moving repositories
 
 `reconcile` won't move a repository that has linked worktrees, because the

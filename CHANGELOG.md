@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `feature new|list|path|status|exec|done`: one folder per cross-repository
+  change, under `features_root` (default `<root>/.features`), with a worktree of
+  each repository on the same branch.
+  - `new` clones any missing repositories, fetches, checks every repository
+    before creating anything (each problem gets a stable error code), locks
+    each worktree, and is resumable. Running it again extends the feature.
+  - A `.fussy-feature.toml` manifest records the members, branch, bases and
+    `--depends` order. A generated `CLAUDE.md` holds facts only; `NOTES.md` is
+    never rewritten.
+  - `status` lists members dependencies-first, with dirty and unpushed state.
+    `exec` runs a command across the members.
+  - `done` refuses on uncommitted changes, and on unpushed commits unless you
+    pass `--force`. It keeps the branches and archives the folder.
+  - A warning when the branch isn't a valid Puppet r10k environment name.
+- `worktree list` shows the `feature` each worktree belongs to.
+- `features_root` config key.
+
+### Changed
+
+- `doctor` and `remove` point to `feature new` and `feature done` for feature
+  worktrees.
+- The plugin skill covers feature workflows: dependency order, pinned
+  cross-repository references, and leaving `done`'s refusal in place.
+
 ## [0.3.0] - 2026-11-01
 
 fussy-git decides where repositories live and works across many of them. It
