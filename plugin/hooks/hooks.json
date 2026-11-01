@@ -1,0 +1,17 @@
+{
+  "description": "Redirect `git clone` in Bash to `fussy-git get`, so other repositories land in their canonical path instead of the current directory or /tmp.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fussy-git hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

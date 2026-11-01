@@ -9,15 +9,16 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 
 use crate::config;
 use crate::fsops;
-use crate::index::{self, RepoEntry};
+use crate::index;
 use crate::preflight::{self, Safety};
 
 /// The outcome of resolving a `remove` query: exactly one repository, plus any
 /// reasons deleting it might lose work.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RemovePlan {
     /// Absolute path to the repository that would be deleted.
     pub path: PathBuf,
@@ -46,40 +47,14 @@ impl RemovePlan {
 /// one, is an error — ambiguity is never resolved by `--force`.
 pub fn plan(cfg: &config::Config, query: &str) -> Result<RemovePlan> {
     let index = index::load_or_build(cfg).context("loading the repository index")?;
-    let needle = query.to_lowercase();
-
-    let hits: Vec<&RepoEntry> = index
-        .entries()
-        .iter()
-        .filter(|entry| {
-            haystacks(entry)
-                .iter()
-                .any(|hay| hay.to_lowercase().contains(&needle))
-        })
-        .collect();
-
-    match hits.as_slice() {
-        [] => bail!("no repo matches {query:?}"),
-        [entry] => {
-            let safety = preflight::inspect(&entry.path)
-                .with_context(|| format!("inspecting {}", entry.path.display()))?;
-            Ok(RemovePlan {
-                path: entry.path.clone(),
-                slug: entry.slug(),
-                blockers: blockers(&safety),
-            })
-        }
-        many => {
-            let mut candidates: Vec<String> = many.iter().map(|entry| label(entry)).collect();
-            candidates.sort();
-            candidates.dedup();
-            bail!(
-                "{query:?} matches {} repositories:\n{}\nbe more specific",
-                candidates.len(),
-                candidates.join("\n"),
-            );
-        }
-    }
+    let entry = index.resolve(query)?;
+    let safety = preflight::inspect(&entry.path)
+        .with_context(|| format!("inspecting {}", entry.path.display()))?;
+    Ok(RemovePlan {
+        path: entry.path.clone(),
+        slug: entry.slug(),
+        blockers: blockers(&safety),
+    })
 }
 
 /// Delete the repository described by `plan`.
@@ -88,17 +63,7 @@ pub fn plan(cfg: &config::Config, query: &str) -> Result<RemovePlan> {
 /// the listing index is refreshed on a best-effort basis (a failure there is a
 /// warning, not an error).
 pub fn execute(cfg: &config::Config, plan: &RemovePlan, force: bool) -> Result<()> {
-    if !plan.blockers.is_empty() && !force {
-        bail!(
-            "refusing to remove {}:\n{}\npass --force to remove anyway",
-            plan.label(),
-            plan.blockers
-                .iter()
-                .map(|b| format!("  - {b}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-    }
+    check(plan, force)?;
 
     fsops::remove_tree(cfg, &plan.path)
         .with_context(|| format!("removing {}", plan.path.display()))?;
@@ -110,23 +75,22 @@ pub fn execute(cfg: &config::Config, plan: &RemovePlan, force: bool) -> Result<(
     Ok(())
 }
 
-/// Strings a query is matched against for one entry: the slug and `owner/repo`
-/// when a remote resolved, otherwise the path relative to its root.
-fn haystacks(entry: &RepoEntry) -> Vec<String> {
-    match entry.slug() {
-        Some(slug) => match (&entry.owner, &entry.repo) {
-            (Some(owner), Some(repo)) => vec![slug, format!("{owner}/{repo}")],
-            _ => vec![slug],
-        },
-        None => vec![entry.rel.to_string_lossy().into_owned()],
+/// Fail when `plan` has blockers and `force` is not set. [`execute`] calls
+/// this itself; the CLI also calls it before prompting, so a refusal is
+/// reported without first asking a question whose answer cannot matter.
+pub fn check(plan: &RemovePlan, force: bool) -> Result<()> {
+    if !plan.blockers.is_empty() && !force {
+        bail!(
+            "refusing to remove {}:\n{}\npass --force to remove anyway",
+            plan.label(),
+            plan.blockers
+                .iter()
+                .map(|b| format!("  - {b}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
-}
-
-/// A stable display label for an entry in the ambiguity error.
-fn label(entry: &RepoEntry) -> String {
-    entry
-        .slug()
-        .unwrap_or_else(|| entry.rel.to_string_lossy().into_owned())
+    Ok(())
 }
 
 /// Turn preflight [`Safety`] facts into `remove`'s blocker phrasing.

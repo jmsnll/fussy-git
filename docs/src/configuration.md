@@ -15,6 +15,7 @@ jobs  = 12                            # concurrency for bulk operations
 default_host = "github.com"           # host for the bare `owner/repo` shorthand
 on_collision = "fail"                 # fail | suffix | skip
 ignore = ["**/node_modules/**", "~/git/scratch/**"]
+worktree_root = "~/git/.worktrees"    # where `worktree add` puts worktrees
 
 [hosts."github.com"]
 alias = ["gh", "github"]              # `fussy-git get gh:jmsnll/fussy-git`
@@ -28,6 +29,10 @@ clone_scheme = "ssh"
 [hooks]
 post_get  = ["git config pull.ff only"]   # run in the repository after `get`
 post_move = ["git maintenance run"]        # run in the repository after a reconcile move
+post_worktree = ["npm ci"]                 # run in each new worktree
+
+[sets]
+payments = ["acme/api", "acme/web", "gl:acme/infra"]   # address as @payments
 ```
 
 ## Keys
@@ -42,6 +47,7 @@ post_move = ["git maintenance run"]        # run in the repository after a recon
 | `on_collision`     | `fail`                   | What to do when two remotes map to one path: `fail`/`suffix`/`skip`. |
 | `fork`             | `prompt`                 | Whether `get` on a repo you cannot push to creates a fork: `prompt`/`always`/`never`. |
 | `ignore`           | `[]`                     | Glob patterns for paths `reconcile` and the index skip.          |
+| `worktree_root`    | `<root>/.worktrees`      | Where [`worktree add`](./commands/worktree.md) creates worktrees. |
 
 ### Per-host `[hosts."<host>"]`
 
@@ -82,6 +88,23 @@ Each hook command runs with the repository as its working directory.
 
 - `post_get` — after a successful `get`
 - `post_move` — after `reconcile`/`adopt` moves a repository
+- `post_worktree` — in each new worktree, after `worktree add` creates it
+
+Hook output goes to stderr, so it never mixes into data on stdout.
 
 This is the place to wire in local setup, editor integration, or
 `git maintenance`.
+
+## Sets
+
+`[sets]` names groups of repositories, for example the services that make up one
+system. Each member is a [`get`](./commands/get.md) target, so it can be
+`owner/repo`, `host/owner/repo`, `alias:owner/repo` or a URL. Refer to a set
+as `@name` anywhere a query is accepted:
+
+```sh
+fussy-git get @payments          # clone whatever is missing
+fussy-git status @payments
+fussy-git exec @payments -- git switch main
+fussy-git list @payments --json
+```

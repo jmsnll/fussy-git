@@ -74,6 +74,8 @@ pub struct Hooks {
     pub post_get: Vec<String>,
     pub post_move: Vec<String>,
     pub post_reconcile: Vec<String>,
+    /// Run in a new worktree after `worktree add` creates it.
+    pub post_worktree: Vec<String>,
 }
 
 /// A fully validated configuration.
@@ -91,6 +93,12 @@ pub struct Config {
     pub on_collision: OnCollision,
     pub fork: ForkPolicy,
     pub hooks: Hooks,
+    /// Where `worktree add` creates linked worktrees. Defaults to
+    /// `<root>/.worktrees`, which `scan` skips as a dot-directory.
+    pub worktree_root: PathBuf,
+    /// Named groups of repositories (`[sets]`), addressed as `@name`. Each
+    /// member is a `get` target: `owner/repo`, `host/owner/repo`, a URL, ….
+    pub sets: BTreeMap<String, Vec<String>>,
     hosts: Vec<HostRule>,
     ignore_globs: Vec<String>,
     ignore_set: GlobSet,
@@ -110,6 +118,8 @@ impl Default for Config {
             on_collision: OnCollision::default(),
             fork: ForkPolicy::default(),
             hooks: Hooks::default(),
+            worktree_root: default_root().join(".worktrees"),
+            sets: BTreeMap::new(),
             hosts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_set: GlobSet::empty(),
@@ -210,6 +220,9 @@ struct RawConfig {
     hosts: BTreeMap<String, RawHost>,
     #[serde(default)]
     hooks: Hooks,
+    worktree_root: Option<String>,
+    #[serde(default)]
+    sets: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,6 +288,20 @@ impl RawConfig {
 
         let ignore_set = build_glob_set(&self.ignore)?;
 
+        let worktree_root = match &self.worktree_root {
+            Some(w) => expand(w)?,
+            None => root.join(".worktrees"),
+        };
+
+        for (name, members) in &self.sets {
+            if name.is_empty() || name.starts_with('@') || name.contains(char::is_whitespace) {
+                bail!("sets: invalid set name {name:?} (no leading `@`, no spaces)");
+            }
+            if members.is_empty() {
+                bail!("sets.{name}: a set needs at least one member");
+            }
+        }
+
         Ok(Config {
             root,
             roots,
@@ -284,6 +311,8 @@ impl RawConfig {
             on_collision: self.on_collision.unwrap_or_default(),
             fork: self.fork.unwrap_or_default(),
             hooks: self.hooks,
+            worktree_root,
+            sets: self.sets,
             hosts,
             ignore_globs: self.ignore,
             ignore_set,

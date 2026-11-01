@@ -18,6 +18,26 @@ use crate::config::Config;
 static STDOUT_COLOR: AtomicBool = AtomicBool::new(false);
 static STDERR_COLOR: AtomicBool = AtomicBool::new(false);
 
+/// Whether a command writes its human report or a JSON document to stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Format {
+    #[default]
+    Text,
+    Json,
+}
+
+impl Format {
+    pub fn is_json(self) -> bool {
+        self == Format::Json
+    }
+}
+
+/// Print `value` to stdout as pretty JSON, followed by a newline.
+pub fn print_json<T: serde::Serialize + ?Sized>(value: &T) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
 /// The `--color` choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ColorChoice {

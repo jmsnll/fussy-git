@@ -1,0 +1,14 @@
+{
+  "name": "fussy-git",
+  "owner": {
+    "name": "James Neill"
+  },
+  "description": "The fussy-git Claude Code plugin: canonical clones, worktrees and multi-repository commands for agents.",
+  "plugins": [
+    {
+      "name": "fussy-git",
+      "source": "./plugin",
+      "description": "Teach Claude Code to use fussy-git for cloning, worktrees and multi-repository work."
+    }
+  ]
+}

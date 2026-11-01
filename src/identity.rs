@@ -11,6 +11,7 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Errors produced while parsing a remote URL.
@@ -54,7 +55,11 @@ pub struct ParsedRemote {
 /// The canonical identity of a repository: what host it lives on, the owner (one
 /// segment for GitHub-style hosts, several for GitLab subgroups) and the repo
 /// name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialised flat — `{host, owner, repo, slug}` with `owner` as the joined
+/// group path — so JSON consumers never re-join segments themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "IdentityRepr", try_from = "IdentityRepr")]
 pub struct Identity {
     pub host: String,
     /// One or more segments. `owner.join("/")` is the "group path".
@@ -133,6 +138,36 @@ impl Identity {
 impl fmt::Display for Identity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.host, self.project_path())
+    }
+}
+
+/// The on-the-wire shape of an [`Identity`]. `slug` is output-only: it is
+/// accepted but ignored on input, and recomputed from the other fields.
+#[derive(Serialize, Deserialize)]
+struct IdentityRepr {
+    host: String,
+    owner: String,
+    repo: String,
+    #[serde(default, skip_deserializing)]
+    slug: String,
+}
+
+impl From<Identity> for IdentityRepr {
+    fn from(id: Identity) -> Self {
+        IdentityRepr {
+            slug: id.to_string(),
+            owner: id.owner_path(),
+            host: id.host,
+            repo: id.repo,
+        }
+    }
+}
+
+impl TryFrom<IdentityRepr> for Identity {
+    type Error = ParseError;
+
+    fn try_from(r: IdentityRepr) -> Result<Self, Self::Error> {
+        Identity::from_host_and_path(&r.host, &format!("{}/{}", r.owner, r.repo))
     }
 }
 
@@ -417,5 +452,22 @@ mod tests {
         assert!(!is_scp_like("https://github.com/owner/repo"));
         assert!(!is_scp_like("ssh://git@github.com/owner/repo"));
         assert!(!is_scp_like("owner/repo"));
+    }
+
+    #[test]
+    fn identity_round_trips_through_flat_json() {
+        let id = Identity::parse("git@gitlab.com:acme/backend/service.git").unwrap();
+        let json = serde_json::to_value(&id).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "host": "gitlab.com",
+                "owner": "acme/backend",
+                "repo": "service",
+                "slug": "gitlab.com/acme/backend/service",
+            })
+        );
+        let back: Identity = serde_json::from_value(json).unwrap();
+        assert_eq!(back, id);
     }
 }
