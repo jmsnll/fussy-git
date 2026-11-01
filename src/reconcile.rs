@@ -10,11 +10,13 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::config::{self, OnCollision};
 use crate::fsops;
 use crate::git;
+use crate::hooks;
 use crate::identity::Identity;
 use crate::preflight;
 use crate::scan::{self, Class};
@@ -28,7 +30,8 @@ const NO_REMOTE_REASON: &str = "no remote — use `fussy-git adopt`";
 // --- plan types -------------------------------------------------------------
 
 /// Why a repository needs to move.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MoveReason {
     /// Same path shape, but a segment differs only in ASCII case (typically the
     /// owner), for example `github.com/Foo/bar` becomes `github.com/foo/bar`.
@@ -51,7 +54,7 @@ impl fmt::Display for MoveReason {
 }
 
 /// A single repository that should be relocated.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Move {
     pub from: PathBuf,
     pub to: PathBuf,
@@ -60,7 +63,7 @@ pub struct Move {
 }
 
 /// Several working copies that resolve to the same canonical path.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Duplicate {
     pub identity: Identity,
     /// The copy to keep (already canonical if one is, else the first by path).
@@ -73,23 +76,30 @@ pub struct Duplicate {
 
 /// Two or more *distinct* identities whose canonical paths collide (typically
 /// case-insensitively, on a case-folding filesystem).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Collision {
     /// A representative canonical path for the colliding set.
     pub target: PathBuf,
     /// Each colliding working copy and the identity it resolves to.
-    pub members: Vec<(PathBuf, Identity)>,
+    pub members: Vec<Member>,
+}
+
+/// One working copy in a [`Collision`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member {
+    pub path: PathBuf,
+    pub identity: Identity,
 }
 
 /// A repository the plan deliberately leaves alone, with the reason why.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Skip {
     pub path: PathBuf,
     pub reason: String,
 }
 
 /// The full categorised result of planning a reconcile.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Plan {
     pub moves: Vec<Move>,
     pub duplicates: Vec<Duplicate>,
@@ -169,7 +179,7 @@ impl Plan {
             let members = c
                 .members
                 .iter()
-                .map(|(_, id)| id.to_string())
+                .map(|m| m.identity.to_string())
                 .collect::<Vec<_>>()
                 .join(" and ");
             let _ = writeln!(out, "  {}{}", verb("collision", ui::danger), members);
@@ -237,6 +247,96 @@ fn plural(n: usize, word: &str) -> String {
     } else {
         format!("{n} {word}s")
     }
+}
+
+// --- plan documents --------------------------------------------------------
+
+/// The version of the JSON plan document. Bump when its shape changes.
+pub const PLAN_VERSION: u32 = 1;
+
+/// A plan as written by `reconcile --json` and read back by
+/// `reconcile --apply --plan <file>`: the plan itself plus the options it was
+/// made with, so applying it re-plans under the same conditions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanDocument {
+    pub version: u32,
+    /// `--allow-dirty` as given when the plan was made.
+    pub allow_dirty: bool,
+    /// Output-only conveniences; ignored when a document is read back.
+    #[serde(default, skip_deserializing)]
+    pub drift: bool,
+    #[serde(default, skip_deserializing)]
+    pub summary: String,
+    #[serde(flatten)]
+    pub plan: Plan,
+}
+
+impl PlanDocument {
+    pub fn new(plan: Plan, opts: &PlanOptions) -> Self {
+        PlanDocument {
+            version: PLAN_VERSION,
+            allow_dirty: opts.allow_dirty,
+            drift: plan.has_drift(),
+            summary: plan.summary(),
+            plan,
+        }
+    }
+
+    /// Read a plan document from `path`, or from stdin when `path` is `-`.
+    pub fn load(path: &Path) -> Result<Self> {
+        let text = if path.as_os_str() == "-" {
+            std::io::read_to_string(std::io::stdin()).context("reading the plan from stdin")?
+        } else {
+            std::fs::read_to_string(path)
+                .with_context(|| format!("reading plan {}", path.display()))?
+        };
+        let doc: PlanDocument = serde_json::from_str(&text)
+            .with_context(|| format!("parsing plan {}", path.display()))?;
+        if doc.version != PLAN_VERSION {
+            bail!(
+                "plan {} is version {}, but this fussy-git reads version {PLAN_VERSION}; \
+                 re-run `fussy-git reconcile --json`",
+                path.display(),
+                doc.version
+            );
+        }
+        Ok(doc)
+    }
+}
+
+/// Refuse to apply a reviewed plan unless a fresh plan agrees with it on every
+/// change `apply` would make. This is what makes plan-then-apply safe: what was
+/// reviewed is exactly what runs, or nothing runs.
+pub fn verify_unchanged(reviewed: &Plan, fresh: &Plan) -> Result<()> {
+    let mut diffs: Vec<String> = Vec::new();
+    for m in &fresh.moves {
+        if !reviewed.moves.contains(m) {
+            diffs.push(format!(
+                "new move: {} -> {}",
+                m.from.display(),
+                m.to.display()
+            ));
+        }
+    }
+    for m in &reviewed.moves {
+        if !fresh.moves.contains(m) {
+            diffs.push(format!(
+                "move no longer planned: {} -> {}",
+                m.from.display(),
+                m.to.display()
+            ));
+        }
+    }
+    if reviewed.collisions != fresh.collisions {
+        diffs.push("the set of collisions changed".to_string());
+    }
+    if diffs.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "the tree has changed since the plan was made:\n  {}\nre-run `fussy-git reconcile --json` and review the new plan",
+        diffs.join("\n  ")
+    )
 }
 
 /// Options for [`plan`].
@@ -326,16 +426,16 @@ pub fn plan(
         if paths.len() <= 1 {
             continue;
         }
-        let mut members: Vec<(PathBuf, Identity)> = Vec::new();
+        let mut members: Vec<Member> = Vec::new();
         for key in paths {
             for &idx in &groups[key] {
-                members.push((
-                    eligibles[idx].d.path.clone(),
-                    eligibles[idx].identity.clone(),
-                ));
+                members.push(Member {
+                    path: eligibles[idx].d.path.clone(),
+                    identity: eligibles[idx].identity.clone(),
+                });
             }
         }
-        members.sort_by(|a, b| a.0.cmp(&b.0));
+        members.sort_by(|a, b| a.path.cmp(&b.path));
         let target = paths.iter().min().cloned().expect("bucket has >1 path");
         plan.collisions.push(Collision { target, members });
     }
@@ -492,6 +592,16 @@ pub struct ApplyReport {
 }
 
 impl ApplyReport {
+    /// The report as a JSON value, with named fields rather than tuples.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "moved": self.moved.iter().map(|(from, to)| serde_json::json!({"from": from, "to": to})).collect::<Vec<_>>(),
+            "failed": self.failed.iter().map(|(path, error)| serde_json::json!({"path": path, "error": error})).collect::<Vec<_>>(),
+            "skipped": self.skipped,
+            "warnings": self.warnings,
+        })
+    }
+
     /// A scannable, optionally coloured rendering of what `apply` did, mirroring
     /// [`Plan::render`]'s layout. Paths are relative to their managed root.
     pub fn render(&self, cfg: &config::Config) -> String {
@@ -640,7 +750,9 @@ fn apply_move(cfg: &config::Config, mv: &Move, opts: &ApplyOptions, report: &mut
         fsops::prune_empty_dirs(from.parent(), root);
     }
 
-    report.warnings.extend(run_post_move_hooks(cfg, to));
+    report
+        .warnings
+        .extend(hooks::run("post_move", &cfg.hooks.post_move, to));
 }
 
 fn apply_collision_suffix(col: &Collision, report: &mut ApplyReport) {
@@ -666,7 +778,7 @@ fn apply_collision_suffix(col: &Collision, report: &mut ApplyReport) {
     }
 
     let mut n = 2u32;
-    for (path, _identity) in &col.members {
+    for Member { path, .. } in &col.members {
         if *path == col.target {
             continue; // the canonical occupant, if any, stays put
         }
@@ -684,25 +796,6 @@ fn apply_collision_suffix(col: &Collision, report: &mut ApplyReport) {
                 .push((path.clone(), format!("collision move failed: {e}"))),
         }
     }
-}
-
-/// Run `cfg.hooks.post_move` in `dir`. Failures are collected as warnings, not
-/// propagated.
-fn run_post_move_hooks(cfg: &config::Config, dir: &Path) -> Vec<String> {
-    let mut warnings = Vec::new();
-    for cmd in &cfg.hooks.post_move {
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .current_dir(dir)
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(s) => warnings.push(format!("post_move hook `{cmd}` exited with {s}")),
-            Err(e) => warnings.push(format!("post_move hook `{cmd}` failed to start: {e}")),
-        }
-    }
-    warnings
 }
 
 #[cfg(test)]
@@ -972,5 +1065,43 @@ mod tests {
         assert!(text.contains("github.com/me/stray"), "{text}");
         assert!(text.contains("1 to move"), "{text}");
         assert!(text.contains("1 in place"), "{text}");
+    }
+
+    #[test]
+    fn plan_document_round_trips_and_detects_drift() {
+        let f = fx();
+        make_repo(&f.root.join("stray"), Some("git@github.com:me/stray.git"));
+        let reviewed = plan_default(&f);
+        assert_eq!(reviewed.moves.len(), 1);
+
+        let doc = PlanDocument::new(reviewed.clone(), &PlanOptions::default());
+        let json = serde_json::to_string(&doc).unwrap();
+        let path = f.root.join("../plan.json");
+        fs::write(&path, &json).unwrap();
+        let loaded = PlanDocument::load(&path).unwrap();
+        assert_eq!(loaded.plan, reviewed);
+        assert!(!loaded.allow_dirty);
+
+        // Unchanged tree: the reviewed plan is accepted.
+        verify_unchanged(&loaded.plan, &plan_default(&f)).unwrap();
+
+        // A second stray appears after review: refuse.
+        make_repo(
+            &f.root.join("another"),
+            Some("git@github.com:me/another.git"),
+        );
+        let err = verify_unchanged(&loaded.plan, &plan_default(&f))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("new move"), "{err}");
+    }
+
+    #[test]
+    fn plan_document_rejects_another_version() {
+        let f = fx();
+        let path = f.root.join("../plan.json");
+        fs::write(&path, r#"{"version": 99, "allow_dirty": false, "moves": [], "duplicates": [], "collisions": [], "skips": [], "ok": 0}"#).unwrap();
+        let err = PlanDocument::load(&path).unwrap_err().to_string();
+        assert!(err.contains("version 99"), "{err}");
     }
 }

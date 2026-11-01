@@ -11,10 +11,12 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use serde::Serialize;
 
 use crate::config::Config;
 use crate::ops::{self, Outcome};
-use crate::{git, scan, ui};
+use crate::ui::{self, Format};
+use crate::{git, scan, sets};
 
 /// Per-repo timeout for the local-only `status` scan.
 const STATUS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -39,10 +41,49 @@ pub fn all_repo_paths(cfg: &Config) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// The repositories a bulk command acts on: every repository, those whose path
+/// contains `query` (case-insensitively), or — when `query` is `@name` — the
+/// members of that set. Set members that are not cloned yet are reported on
+/// stderr and left out.
+pub fn select(cfg: &Config, query: Option<&str>) -> Result<Vec<PathBuf>> {
+    let Some(query) = query else {
+        return all_repo_paths(cfg);
+    };
+    let Some(name) = sets::set_name(query) else {
+        let needle = query.to_lowercase();
+        let mut repos = all_repo_paths(cfg)?;
+        repos.retain(|p| p.to_string_lossy().to_lowercase().contains(&needle));
+        return Ok(repos);
+    };
+
+    let members = sets::members(cfg, name)?;
+    let discovered: Vec<scan::Discovered> = scan::scan(cfg)?
+        .into_iter()
+        .filter(|d| d.class != scan::Class::LinkedWorktree)
+        .collect();
+    let mut repos = Vec::new();
+    for id in &members {
+        let hits: Vec<&scan::Discovered> = discovered
+            .iter()
+            .filter(|d| d.identity.as_ref() == Some(id))
+            .collect();
+        if hits.is_empty() {
+            eprintln!(
+                "{} {id} is in @{name} but not cloned (run `fussy-git get @{name}`)",
+                ui::warn_prefix()
+            );
+        }
+        repos.extend(hits.into_iter().map(|d| d.path.clone()));
+    }
+    repos.sort();
+    repos.dedup();
+    Ok(repos)
+}
+
 // --- status ----------------------------------------------------------------
 
 /// A one-line summary of a repository's working state.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct RepoStatus {
     /// Current branch, or `None` on a detached HEAD.
     pub branch: Option<String>,
@@ -126,9 +167,13 @@ fn status_row(cfg: &Config, outcome: &Outcome<RepoStatus>) -> StatusRow {
     }
 }
 
-/// Print a compact aligned status table and return an exit code.
-pub fn status(cfg: &Config, repos: Vec<PathBuf>, jobs: usize) -> Result<i32> {
+/// Print a compact aligned status table (or a JSON array) and return an exit
+/// code.
+pub fn status(cfg: &Config, repos: Vec<PathBuf>, jobs: usize, format: Format) -> Result<i32> {
     let outcomes = collect_statuses(repos, jobs);
+    if format.is_json() {
+        return print_outcomes(cfg, &outcomes, |st| Some(st.clone()));
+    }
     for o in &outcomes {
         if let Err(err) = &o.result {
             eprintln!("{}: {}", ui::repo_name(cfg, &o.repo), first_line(err));
@@ -190,7 +235,8 @@ pub fn status(cfg: &Config, repos: Vec<PathBuf>, jobs: usize) -> Result<i32> {
 // --- pull ------------------------------------------------------------------
 
 /// Outcome of a successful `pull` against one repo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PullOutcome {
     /// The working tree advanced.
     Updated,
@@ -215,8 +261,15 @@ fn run_pull(repos: Vec<PathBuf>, jobs: usize) -> Vec<Outcome<PullOutcome>> {
 }
 
 /// `git pull --ff-only` across `repos`; print per-repo lines plus a summary.
-pub fn pull(cfg: &Config, repos: Vec<PathBuf>, jobs: usize) -> Result<i32> {
+pub fn pull(cfg: &Config, repos: Vec<PathBuf>, jobs: usize, format: Format) -> Result<i32> {
     let outcomes = run_pull(repos, jobs);
+    if format.is_json() {
+        #[derive(Serialize)]
+        struct Pulled {
+            result: PullOutcome,
+        }
+        return print_outcomes(cfg, &outcomes, |&result| Some(Pulled { result }));
+    }
     let name_w = name_width(cfg, &outcomes);
 
     let (mut updated, mut up_to_date, mut failed) = (0u32, 0u32, 0u32);
@@ -263,8 +316,11 @@ fn run_fetch(repos: Vec<PathBuf>, jobs: usize) -> Vec<Outcome<()>> {
 }
 
 /// `git fetch --all --prune` across `repos`; print per-repo lines plus a summary.
-pub fn fetch(cfg: &Config, repos: Vec<PathBuf>, jobs: usize) -> Result<i32> {
+pub fn fetch(cfg: &Config, repos: Vec<PathBuf>, jobs: usize, format: Format) -> Result<i32> {
     let outcomes = run_fetch(repos, jobs);
+    if format.is_json() {
+        return print_outcomes(cfg, &outcomes, |_| None::<()>);
+    }
     let name_w = name_width(cfg, &outcomes);
 
     let (mut fetched, mut failed) = (0u32, 0u32);
@@ -295,6 +351,45 @@ pub fn fetch(cfg: &Config, repos: Vec<PathBuf>, jobs: usize) -> Result<i32> {
 }
 
 // --- helpers --------------------------------------------------------------
+
+/// One element of a batch command's JSON array: which repository, whether it
+/// succeeded, and the command-specific fields flattened alongside.
+#[derive(Serialize)]
+pub(crate) struct OutcomeJson<T: Serialize> {
+    /// The repository path relative to its managed root.
+    pub repo: String,
+    pub path: PathBuf,
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub value: Option<T>,
+}
+
+/// Print `outcomes` as a JSON array, projecting each success through `fields`,
+/// and return the batch exit code.
+pub(crate) fn print_outcomes<T, U: Serialize>(
+    cfg: &Config,
+    outcomes: &[Outcome<T>],
+    fields: impl Fn(&T) -> Option<U>,
+) -> Result<i32> {
+    let rows: Vec<OutcomeJson<U>> = outcomes
+        .iter()
+        .map(|o| OutcomeJson {
+            repo: ui::repo_name(cfg, &o.repo),
+            path: o.repo.clone(),
+            ok: o.result.is_ok(),
+            error: o.result.as_ref().err().cloned(),
+            value: o.result.as_ref().ok().and_then(&fields),
+        })
+        .collect();
+    ui::print_json(&rows)?;
+    Ok(if rows.iter().any(|r| !r.ok) {
+        EXIT_PARTIAL_FAILURE
+    } else {
+        0
+    })
+}
 
 fn name_width<T>(cfg: &Config, outcomes: &[Outcome<T>]) -> usize {
     outcomes
@@ -424,7 +519,7 @@ mod tests {
         let fetched = run_fetch(vec![one.clone(), two.clone()], 4);
         assert_eq!(fetched.iter().filter(|o| o.result.is_ok()).count(), 2);
         assert_eq!(
-            fetch(&cfg, vec![one.clone(), two.clone()], 4).unwrap(),
+            fetch(&cfg, vec![one.clone(), two.clone()], 4, Format::Text).unwrap(),
             0,
             "fetch exit code"
         );
@@ -456,7 +551,7 @@ mod tests {
                 .count(),
             2
         );
-        assert_eq!(pull(&cfg, vec![one, two], 4).unwrap(), 0);
+        assert_eq!(pull(&cfg, vec![one, two], 4, Format::Text).unwrap(), 0);
     }
 
     #[test]
@@ -475,7 +570,7 @@ mod tests {
         assert_eq!(outcomes.iter().filter(|o| o.result.is_ok()).count(), 1);
         assert_eq!(outcomes.iter().filter(|o| o.result.is_err()).count(), 1);
         assert_eq!(
-            fetch(&cfg, vec![good, bad], 4).unwrap(),
+            fetch(&cfg, vec![good, bad], 4, Format::Text).unwrap(),
             EXIT_PARTIAL_FAILURE
         );
     }
@@ -525,6 +620,6 @@ mod tests {
         let cfg = test_config(&root);
         let repo = root.join("solo");
         make_repo(&repo, None);
-        assert_eq!(status(&cfg, vec![repo], 2).unwrap(), 0);
+        assert_eq!(status(&cfg, vec![repo], 2, Format::Text).unwrap(), 0);
     }
 }

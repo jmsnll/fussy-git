@@ -13,12 +13,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Result};
+use serde::Serialize;
 
 use crate::config;
 use crate::git;
 use crate::reconcile;
 use crate::scan::{self, Class};
-use crate::ui;
+use crate::ui::{self, Format};
+use crate::worktree;
 
 /// Options for [`run`].
 #[derive(Debug, Clone, Default)]
@@ -59,42 +61,121 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs(n.saturating_mul(secs_per)))
 }
 
-/// Scan, plan, run the extra checks, print the grouped report, and return the
-/// process exit code: `0` when the tree is clean, `3` when any issue was found.
-pub fn run(cfg: &config::Config, opts: &DoctorOptions) -> Result<i32> {
-    let (text, code) = report(cfg, opts)?;
-    print!("{text}");
-    Ok(code)
+/// Everything `doctor` found, grouped by kind. Serialised as-is for `--json`.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Findings {
+    /// Repositories examined (linked worktrees excluded).
+    pub checked: usize,
+    pub misplaced: Vec<Misplaced>,
+    pub duplicates: Vec<reconcile::Duplicate>,
+    pub collisions: Vec<reconcile::Collision>,
+    pub no_remote: Vec<PathBuf>,
+    pub unresolved: Vec<Unresolved>,
+    pub broken: Vec<PathBuf>,
+    pub detached: Vec<Detached>,
+    pub stale: Vec<Stale>,
+    /// Worktrees `fussy-git worktree prune` would remove.
+    pub worktrees: Vec<worktree::PruneCandidate>,
 }
 
-/// Build the full report text (sections plus the trailing summary line) and the
-/// exit code. Split out from [`run`] so tests can inspect the output.
+#[derive(Debug, Clone, Serialize)]
+pub struct Misplaced {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Unresolved {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Detached {
+    pub path: PathBuf,
+    /// Short `HEAD` commit, empty if it could not be read.
+    pub head: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Stale {
+    pub path: PathBuf,
+    /// Seconds since the last commit.
+    pub age_secs: u64,
+}
+
+impl Findings {
+    pub fn is_clean(&self) -> bool {
+        self.misplaced.is_empty()
+            && self.duplicates.is_empty()
+            && self.collisions.is_empty()
+            && self.no_remote.is_empty()
+            && self.unresolved.is_empty()
+            && self.broken.is_empty()
+            && self.detached.is_empty()
+            && self.stale.is_empty()
+            && self.worktrees.is_empty()
+    }
+
+    /// `0` when the tree is clean, `3` when any issue was found.
+    pub fn exit_code(&self) -> i32 {
+        if self.is_clean() {
+            0
+        } else {
+            3
+        }
+    }
+}
+
+/// Scan, plan, run the extra checks, print the grouped report (or JSON), and
+/// return the process exit code: `0` when the tree is clean, `3` when any issue
+/// was found.
+pub fn run(cfg: &config::Config, opts: &DoctorOptions, format: Format) -> Result<i32> {
+    let findings = collect(cfg, opts)?;
+    if format.is_json() {
+        ui::print_json(&findings)?;
+    } else {
+        print!("{}", render(cfg, &findings));
+    }
+    Ok(findings.exit_code())
+}
+
+/// The rendered text and exit code, for tests.
+#[cfg(test)]
 fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
+    let findings = collect(cfg, opts)?;
+    Ok((render(cfg, &findings), findings.exit_code()))
+}
+
+/// Gather every finding. Reads only; never mutates anything.
+pub fn collect(cfg: &config::Config, opts: &DoctorOptions) -> Result<Findings> {
     let discovered = scan::scan(cfg)?;
     let plan = reconcile::plan(cfg, &discovered, &reconcile::PlanOptions::default())?;
-
-    let mut broken: Vec<PathBuf> = Vec::new();
-    let mut detached: Vec<(PathBuf, String)> = Vec::new();
-    let mut stale: Vec<(PathBuf, u64)> = Vec::new();
-    let mut total = 0usize;
+    let mut f = Findings::default();
 
     for d in &discovered {
         if matches!(d.class, Class::LinkedWorktree) {
             continue;
         }
-        total += 1;
+        f.checked += 1;
         let path = d.path.as_path();
 
         if is_broken(path) {
-            broken.push(path.to_path_buf());
+            f.broken.push(path.to_path_buf());
             continue;
         }
         if is_detached(path) {
-            detached.push((path.to_path_buf(), short_head(path).unwrap_or_default()));
+            f.detached.push(Detached {
+                path: path.to_path_buf(),
+                head: short_head(path).unwrap_or_default(),
+            });
         }
         if let Some(max_age) = opts.stale {
             if let Some(age) = staleness(path, max_age) {
-                stale.push((path.to_path_buf(), age));
+                f.stale.push(Stale {
+                    path: path.to_path_buf(),
+                    age_secs: age,
+                });
             }
         }
     }
@@ -102,77 +183,95 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
     // `plan.skips` carries the no-remote / unparseable verdicts (each with its
     // own reason). A broken repo reads as "no remote" to the planner too, so
     // drop anything already reported as broken.
-    let mut no_remote: Vec<PathBuf> = Vec::new();
-    let mut unresolved: Vec<(PathBuf, String)> = Vec::new();
     for s in &plan.skips {
-        if broken.iter().any(|b| b == &s.path) {
+        if f.broken.iter().any(|b| b == &s.path) {
             continue;
         }
         if s.reason.contains("adopt") {
-            no_remote.push(s.path.clone());
+            f.no_remote.push(s.path.clone());
         } else {
-            unresolved.push((s.path.clone(), s.reason.clone()));
+            f.unresolved.push(Unresolved {
+                path: s.path.clone(),
+                reason: s.reason.clone(),
+            });
         }
     }
 
+    f.misplaced = plan
+        .moves
+        .iter()
+        .map(|m| Misplaced {
+            from: m.from.clone(),
+            to: m.to.clone(),
+        })
+        .collect();
+    f.duplicates = plan.duplicates;
+    f.collisions = plan.collisions;
+    f.worktrees = worktree::prune(cfg, &worktree::PruneOptions::default())?.candidates;
+    Ok(f)
+}
+
+/// The grouped, human-readable report: a header, one section per kind of
+/// finding, and a trailing summary line.
+fn render(cfg: &config::Config, f: &Findings) -> String {
     let name = |p: &Path| ui::repo_name(cfg, p);
     let mut sections = String::new();
     let mut summary: Vec<String> = Vec::new();
 
-    if !plan.moves.is_empty() {
+    if !f.misplaced.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("misplaced ({})", plan.moves.len()))
+            ui::warn(&format!("misplaced ({})", f.misplaced.len()))
         );
-        for m in &plan.moves {
+        for m in &f.misplaced {
             let _ = writeln!(sections, "    {}   ->   {}", name(&m.from), name(&m.to));
         }
-        summary.push(format!("{} misplaced", plan.moves.len()));
+        summary.push(format!("{} misplaced", f.misplaced.len()));
     }
 
-    if !plan.duplicates.is_empty() {
+    if !f.duplicates.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("duplicates ({})", plan.duplicates.len()))
+            ui::warn(&format!("duplicates ({})", f.duplicates.len()))
         );
-        for dup in &plan.duplicates {
+        for dup in &f.duplicates {
             let _ = writeln!(sections, "    {}", dup.identity);
             let _ = writeln!(sections, "      keep  {}", name(&dup.keep));
             for o in &dup.others {
                 let _ = writeln!(sections, "      copy  {}", name(o));
             }
         }
-        summary.push(plural(plan.duplicates.len(), "duplicate"));
+        summary.push(plural(f.duplicates.len(), "duplicate"));
     }
 
-    if !plan.collisions.is_empty() {
+    if !f.collisions.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::danger(&format!("collisions ({})", plan.collisions.len()))
+            ui::danger(&format!("collisions ({})", f.collisions.len()))
         );
-        for c in &plan.collisions {
+        for c in &f.collisions {
             let members = c
                 .members
                 .iter()
-                .map(|(_, id)| id.to_string())
+                .map(|m| m.identity.to_string())
                 .collect::<Vec<_>>()
                 .join(" and ");
             let _ = writeln!(sections, "    {members}");
             let _ = writeln!(sections, "      both resolve to {}", name(&c.target));
         }
-        summary.push(plural(plan.collisions.len(), "collision"));
+        summary.push(plural(f.collisions.len(), "collision"));
     }
 
-    if !no_remote.is_empty() {
+    if !f.no_remote.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("no remote ({})", no_remote.len()))
+            ui::warn(&format!("no remote ({})", f.no_remote.len()))
         );
-        for p in &no_remote {
+        for p in &f.no_remote {
             let _ = writeln!(
                 sections,
                 "    {}   {}",
@@ -180,28 +279,28 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
                 ui::dim("run `fussy-git adopt` or move it out of the root")
             );
         }
-        summary.push(format!("{} no-remote", no_remote.len()));
+        summary.push(format!("{} no-remote", f.no_remote.len()));
     }
 
-    if !unresolved.is_empty() {
+    if !f.unresolved.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("unresolved remote ({})", unresolved.len()))
+            ui::warn(&format!("unresolved remote ({})", f.unresolved.len()))
         );
-        for (p, why) in &unresolved {
-            let _ = writeln!(sections, "    {}   {}", name(p), ui::dim(why));
+        for u in &f.unresolved {
+            let _ = writeln!(sections, "    {}   {}", name(&u.path), ui::dim(&u.reason));
         }
-        summary.push(plural(unresolved.len(), "unresolved"));
+        summary.push(plural(f.unresolved.len(), "unresolved"));
     }
 
-    if !broken.is_empty() {
+    if !f.broken.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::danger(&format!("broken ({})", broken.len()))
+            ui::danger(&format!("broken ({})", f.broken.len()))
         );
-        for p in &broken {
+        for p in &f.broken {
             let _ = writeln!(
                 sections,
                 "    {}   {}",
@@ -209,16 +308,16 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
                 ui::dim(".git present but git cannot read the repository")
             );
         }
-        summary.push(format!("{} broken", broken.len()));
+        summary.push(format!("{} broken", f.broken.len()));
     }
 
-    if !detached.is_empty() {
+    if !f.detached.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("detached HEAD ({})", detached.len()))
+            ui::warn(&format!("detached HEAD ({})", f.detached.len()))
         );
-        for (p, sha) in &detached {
+        for Detached { path: p, head: sha } in &f.detached {
             if sha.is_empty() {
                 let _ = writeln!(sections, "    {}", name(p));
             } else {
@@ -230,16 +329,20 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
                 );
             }
         }
-        summary.push(format!("{} detached", detached.len()));
+        summary.push(format!("{} detached", f.detached.len()));
     }
 
-    if !stale.is_empty() {
+    if !f.stale.is_empty() {
         let _ = writeln!(
             sections,
             "  {}",
-            ui::warn(&format!("stale ({})", stale.len()))
+            ui::warn(&format!("stale ({})", f.stale.len()))
         );
-        for (p, age) in &stale {
+        for Stale {
+            path: p,
+            age_secs: age,
+        } in &f.stale
+        {
             let _ = writeln!(
                 sections,
                 "    {}   {}",
@@ -247,9 +350,32 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
                 ui::dim(&format!("last commit {} ago", humanize_age(*age)))
             );
         }
-        summary.push(format!("{} stale", stale.len()));
+        summary.push(format!("{} stale", f.stale.len()));
     }
 
+    if !f.worktrees.is_empty() {
+        let _ = writeln!(
+            sections,
+            "  {}",
+            ui::warn(&format!("prunable worktrees ({})", f.worktrees.len()))
+        );
+        for c in &f.worktrees {
+            let _ = writeln!(
+                sections,
+                "    {}   {}",
+                ui::repo_name(cfg, &c.worktree.path),
+                ui::dim(&c.reason.to_string())
+            );
+        }
+        let _ = writeln!(
+            sections,
+            "    {}",
+            ui::dim("run `fussy-git worktree prune --apply` to remove them")
+        );
+        summary.push(format!("{} prunable worktree(s)", f.worktrees.len()));
+    }
+
+    let total = f.checked;
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -264,13 +390,12 @@ fn report(cfg: &config::Config, opts: &DoctorOptions) -> Result<(String, i32)> {
 
     if summary.is_empty() {
         let _ = writeln!(out, "\nno issues");
-        Ok((out, 0))
     } else {
         let _ = writeln!(out);
         out.push_str(&sections);
         let _ = writeln!(out, "\n{}", summary.join(", "));
-        Ok((out, 3))
     }
+    out
 }
 
 fn plural(n: usize, word: &str) -> String {

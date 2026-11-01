@@ -20,6 +20,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
+use crate::query::{self, Candidate, MatchError};
 use crate::scan::{self, Discovered};
 
 /// The on-disk cache format version. Bump when the shape below changes.
@@ -51,6 +52,12 @@ impl RepoEntry {
             (Some(h), Some(o), Some(r)) => Some(format!("{h}/{o}/{r}")),
             _ => None,
         }
+    }
+
+    /// The slug, or the path relative to its root when the remote is unknown.
+    pub fn label(&self) -> String {
+        self.slug()
+            .unwrap_or_else(|| self.rel.to_string_lossy().into_owned())
     }
 
     /// `owner/repo`, when both are known.
@@ -156,6 +163,50 @@ impl Index {
     }
 }
 
+impl Index {
+    /// Resolve `query` to exactly one entry. The query is a case-insensitive
+    /// substring of the `host/owner/repo` slug or of `owner/repo`, falling back
+    /// to the path relative to its root when there is no remote. Zero matches,
+    /// or more than one, is a [`MatchError`].
+    pub fn resolve(&self, query: &str) -> Result<&RepoEntry, MatchError> {
+        let needle = query.trim().to_lowercase();
+        let hits: Vec<&RepoEntry> = self
+            .entries
+            .iter()
+            .filter(|e| {
+                !needle.is_empty()
+                    && haystacks(e)
+                        .iter()
+                        .any(|hay| hay.to_lowercase().contains(&needle))
+            })
+            .collect();
+        let candidates = hits
+            .iter()
+            .map(|e| Candidate {
+                slug: e.label(),
+                path: e.path.clone(),
+            })
+            .collect();
+        let hit = query::exactly_one(query, candidates)?;
+        Ok(hits
+            .into_iter()
+            .find(|e| e.path == hit.path)
+            .expect("the hit came from these entries"))
+    }
+}
+
+/// Strings a query is matched against for one entry: the slug and `owner/repo`
+/// when a remote resolved, otherwise the path relative to its root.
+fn haystacks(entry: &RepoEntry) -> Vec<String> {
+    match entry.slug() {
+        Some(slug) => match entry.owner_repo() {
+            Some(or) => vec![slug, or],
+            None => vec![slug],
+        },
+        None => vec![entry.rel.to_string_lossy().into_owned()],
+    }
+}
+
 /// Load the cache if it is still valid, otherwise [`build`].
 pub fn load_or_build(cfg: &config::Config) -> Result<Index> {
     load_or_build_at(cfg, &cache_path(cfg))
@@ -231,7 +282,14 @@ fn write_cache(path: &Path, file: &CacheFile) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(file)?;
-    std::fs::write(path, json)?;
+    // Write-then-rename so a concurrent reader (another shell, another agent)
+    // sees either the old cache or the new one, never a truncated file.
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, json)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(())
 }
 

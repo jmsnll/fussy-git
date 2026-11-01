@@ -7,12 +7,13 @@
 //! it).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 
 use crate::config;
 use crate::git;
+use crate::hooks;
 use crate::identity::Identity;
 use crate::resolve;
 
@@ -27,25 +28,51 @@ pub struct GetOptions {
     pub update: bool,
 }
 
-/// Clone `target` into its canonical path under `cfg.root` and return that path.
+/// What [`run`] did.
+#[derive(Debug, Clone, Serialize)]
+pub struct GetResult {
+    /// The canonical path, which now holds the repository.
+    pub path: PathBuf,
+    pub identity: Identity,
+    /// True when this call cloned the repository; false when it already existed.
+    pub created: bool,
+    /// True when `--update` fast-forwarded an existing repository.
+    pub updated: bool,
+    /// Non-fatal notes, such as a failing `post_get` hook.
+    pub warnings: Vec<String>,
+}
+
+/// Clone `target` into its canonical path under `cfg.root`.
 ///
 /// `target` may be a full URL, an scp-like remote, or a shorthand
 /// (`owner/repo`, `gh:owner/repo`, `host.tld/owner/repo`).
-pub fn run(cfg: &config::Config, target: &str, opts: &GetOptions) -> Result<PathBuf> {
+///
+/// The clone is made into a hidden sibling directory and renamed into place, so
+/// a failed clone never leaves a half-written repository behind, and two
+/// concurrent `get`s of the same target (say, from two agents) cannot
+/// interleave: the loser of the rename discards its copy and reports the
+/// winner's.
+pub fn run(cfg: &config::Config, target: &str, opts: &GetOptions) -> Result<GetResult> {
     let id = resolve::identity_from_target(cfg, target)
         .with_context(|| format!("resolving target {target:?}"))?;
-
-    let rel = cfg.template_for(&id.host).render(&id, None);
-    let path = cfg.root.join(rel);
+    let path = canonical_path(cfg, &id);
 
     if path.exists() && git::is_repo_root(&path) {
+        let mut updated = false;
         if opts.update {
             eprintln!("fussy-git: updating {}", path.display());
             if !git::run_inherited(Some(&path), ["pull", "--ff-only"])? {
                 anyhow::bail!("git pull --ff-only failed in {}", path.display());
             }
+            updated = true;
         }
-        return Ok(path);
+        return Ok(GetResult {
+            path,
+            identity: id,
+            created: false,
+            updated,
+            warnings: Vec::new(),
+        });
     }
 
     let url = if is_url(target) {
@@ -64,12 +91,57 @@ pub fn run(cfg: &config::Config, target: &str, opts: &GetOptions) -> Result<Path
         extra.push("1");
     }
 
-    git::clone(&url, &path, &extra)
-        .with_context(|| format!("cloning {url} into {}", path.display()))?;
+    let staging = staging_path(&path);
+    if let Err(e) = git::clone(&url, &staging, &extra) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.context(format!("cloning {url} into {}", path.display())));
+    }
 
-    run_post_get_hooks(cfg, &path);
+    if let Err(e) = std::fs::rename(&staging, &path) {
+        let _ = std::fs::remove_dir_all(&staging);
+        if git::is_repo_root(&path) {
+            // Someone else finished cloning the same repository first.
+            return Ok(GetResult {
+                path,
+                identity: id,
+                created: false,
+                updated: false,
+                warnings: Vec::new(),
+            });
+        }
+        return Err(anyhow::Error::new(e).context(format!(
+            "moving the fresh clone into {} (is something else there?)",
+            path.display()
+        )));
+    }
 
-    Ok(path)
+    let warnings = hooks::run("post_get", &cfg.hooks.post_get, &path);
+    for w in &warnings {
+        eprintln!("fussy-git: {w}");
+    }
+
+    Ok(GetResult {
+        path,
+        identity: id,
+        created: true,
+        updated: false,
+        warnings,
+    })
+}
+
+/// Where `id` lives under the primary root.
+pub fn canonical_path(cfg: &config::Config, id: &Identity) -> PathBuf {
+    cfg.root.join(cfg.template_for(&id.host).render(id, None))
+}
+
+/// A hidden, per-process sibling of `path` to clone into. Hidden so that a scan
+/// running mid-clone skips it.
+fn staging_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "repo".to_string());
+    path.with_file_name(format!(".{name}.fussy-git-{}", std::process::id()))
 }
 
 /// True when `target` is itself a remote URL rather than a shorthand.
@@ -116,26 +188,6 @@ fn clone_url(cfg: &config::Config, id: &Identity) -> String {
     }
 }
 
-/// Run each `post_get` hook in the freshly cloned repo. Failures are warnings.
-fn run_post_get_hooks(cfg: &config::Config, dir: &Path) {
-    for cmd in &cfg.hooks.post_get {
-        match Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .current_dir(dir)
-            .status()
-        {
-            Ok(status) if status.success() => {}
-            Ok(status) => {
-                eprintln!("fussy-git: post_get hook {cmd:?} exited with {status}");
-            }
-            Err(e) => {
-                eprintln!("fussy-git: post_get hook {cmd:?} failed to start: {e}");
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,15 +222,26 @@ mod tests {
         let url = bare_remote(tmp.path(), "thing");
         let cfg = cfg_for(tmp.path());
 
-        let dest = run(&cfg, &url, &GetOptions::default()).unwrap();
+        let first = run(&cfg, &url, &GetOptions::default()).unwrap();
+        let dest = first.path.clone();
+        assert!(first.created);
         assert!(dest.starts_with(cfg.root.join("example.com")), "{dest:?}");
         assert_eq!(dest.file_name().unwrap(), "thing");
         assert!(git::is_repo_root(&dest));
         assert!(dest.join("README.md").is_file());
 
+        // No staging directory is left beside the clone.
+        let leftovers: Vec<_> = std::fs::read_dir(dest.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+
         // Second call is a no-op returning the same path.
         let again = run(&cfg, &url, &GetOptions::default()).unwrap();
-        assert_eq!(again, dest);
+        assert_eq!(again.path, dest);
+        assert!(!again.created);
     }
 
     #[test]
@@ -187,7 +250,7 @@ mod tests {
         let url = bare_remote(tmp.path(), "proj");
         let cfg = cfg_for(tmp.path());
 
-        let dest = run(&cfg, &url, &GetOptions::default()).unwrap();
+        let dest = run(&cfg, &url, &GetOptions::default()).unwrap().path;
         assert!(!dest.join("NEW.md").exists());
 
         // Push a new commit upstream via an independent clone.
@@ -203,7 +266,8 @@ mod tests {
             ..Default::default()
         };
         let dest2 = run(&cfg, &url, &opts).unwrap();
-        assert_eq!(dest2, dest);
+        assert_eq!(dest2.path, dest);
+        assert!(dest2.updated);
         assert!(
             dest.join("NEW.md").is_file(),
             "update should have pulled the new commit"

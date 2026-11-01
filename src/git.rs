@@ -53,8 +53,12 @@ where
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Run git streaming stdout/stderr straight to the terminal (for `clone`,
-/// `fetch`, `pull` where the user wants progress). Returns whether it succeeded.
+/// Run git streaming its output straight to the terminal (for `clone`, `fetch`,
+/// `pull` where the user wants progress). Returns whether it succeeded.
+///
+/// git's stdout is redirected to our stderr: `pull` prints "Already up to
+/// date." on stdout, which would otherwise end up inside
+/// `cd "$(fussy-git get --update …)"` or a `--json` document.
 pub fn run_inherited<I, S>(cwd: Option<&Path>, args: I) -> Result<bool>
 where
     I: IntoIterator<Item = S>,
@@ -67,6 +71,7 @@ where
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.args(args);
     cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::from(std::io::stderr()));
     let status = cmd.status().context("spawning `git` (is it on PATH?)")?;
     Ok(status.success())
 }
@@ -208,6 +213,160 @@ pub fn linked_worktrees(repo: &Path) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+/// One entry from `git worktree list --porcelain`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeEntry {
+    pub path: PathBuf,
+    /// `HEAD` commit, empty for a bare entry.
+    pub head: String,
+    /// Short branch name, or `None` when detached (or bare).
+    pub branch: Option<String>,
+    pub bare: bool,
+    pub locked: bool,
+    /// git considers the worktree prunable (typically: its directory is gone).
+    pub prunable: bool,
+}
+
+/// Every worktree of `repo`, main worktree first, as git reports them.
+pub fn worktrees(repo: &Path) -> Result<Vec<WorktreeEntry>> {
+    let text = stdout(Some(repo), ["worktree", "list", "--porcelain"])?;
+    Ok(parse_worktree_porcelain(&text))
+}
+
+fn parse_worktree_porcelain(text: &str) -> Vec<WorktreeEntry> {
+    let mut out = Vec::new();
+    let mut cur: Option<WorktreeEntry> = None;
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            out.extend(cur.take());
+            cur = Some(WorktreeEntry {
+                path: PathBuf::from(path),
+                head: String::new(),
+                branch: None,
+                bare: false,
+                locked: false,
+                prunable: false,
+            });
+            continue;
+        }
+        let Some(wt) = cur.as_mut() else { continue };
+        let (key, value) = line.split_once(' ').unwrap_or((line, ""));
+        match key {
+            "HEAD" => wt.head = value.to_string(),
+            "branch" => {
+                wt.branch = Some(
+                    value
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(value)
+                        .to_string(),
+                )
+            }
+            "bare" => wt.bare = true,
+            "locked" => wt.locked = true,
+            "prunable" => wt.prunable = true,
+            _ => {}
+        }
+    }
+    out.extend(cur);
+    out
+}
+
+/// The revision that names the repository's default branch, for use as a
+/// merge target or a base for new branches: `origin/HEAD`'s target when it is
+/// set (for example `origin/main`), else the first of `origin/main`,
+/// `origin/master`, `main`, `master` that exists.
+pub fn default_branch(repo: &Path) -> Option<String> {
+    if let Ok(r) = stdout(
+        Some(repo),
+        [
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    ) {
+        if !r.is_empty() {
+            return Some(r);
+        }
+    }
+    [
+        ("refs/remotes/origin/main", "origin/main"),
+        ("refs/remotes/origin/master", "origin/master"),
+        ("refs/heads/main", "main"),
+        ("refs/heads/master", "master"),
+    ]
+    .into_iter()
+    .find(|(full, _)| ref_exists(repo, full))
+    .map(|(_, short)| short.to_string())
+}
+
+/// True if the fully qualified ref (`refs/heads/x`) exists.
+pub fn ref_exists(repo: &Path, full_ref: &str) -> bool {
+    run(Some(repo), ["show-ref", "--verify", "--quiet", full_ref]).is_ok()
+}
+
+/// True if `rev` is an ancestor of (or equal to) `of`.
+pub fn is_ancestor(repo: &Path, rev: &str, of: &str) -> bool {
+    run(Some(repo), ["merge-base", "--is-ancestor", rev, of]).is_ok()
+}
+
+/// True if the branch's upstream is configured but no longer exists on the
+/// remote — the usual state after a pull request is merged and its branch
+/// deleted, and a fetch has pruned it.
+pub fn upstream_gone(repo: &Path, branch: &str) -> bool {
+    stdout(
+        Some(repo),
+        [
+            "for-each-ref",
+            "--format=%(upstream:track)",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .map(|t| t.contains("gone"))
+    .unwrap_or(false)
+}
+
+/// Number of reflog entries for a local branch. A branch that was only ever
+/// created (and never committed to, reset, or fast-forwarded) has exactly one.
+pub fn branch_reflog_len(repo: &Path, branch: &str) -> usize {
+    stdout(
+        Some(repo),
+        [
+            "reflog",
+            "show",
+            "--format=%H",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .map(|t| t.lines().filter(|l| !l.is_empty()).count())
+    .unwrap_or(0)
+}
+
+/// The main repository a working tree belongs to: itself for a normal
+/// checkout, the repository that owns it for a linked worktree.
+pub fn main_worktree(path: &Path) -> Result<PathBuf> {
+    let common = stdout(
+        Some(path),
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let common = PathBuf::from(common);
+    // `<repo>/.git` for a normal repository; a bare repository is its own
+    // common dir.
+    if common.file_name().is_some_and(|n| n == ".git") {
+        Ok(common.parent().map(Path::to_path_buf).unwrap_or(common))
+    } else {
+        Ok(common)
+    }
+}
+
+/// The top level of the working tree containing `path`.
+pub fn toplevel(path: &Path) -> Result<PathBuf> {
+    Ok(PathBuf::from(stdout(
+        Some(path),
+        ["rev-parse", "--show-toplevel"],
+    )?))
+}
+
 /// Clone `url` into `dest` with progress streamed to the terminal.
 pub fn clone(url: &str, dest: &Path, extra: &[&str]) -> Result<()> {
     if let Some(parent) = dest.parent() {
@@ -321,5 +480,40 @@ mod tests {
         std::fs::write(repo.join("README.md"), "wip").unwrap();
         testutil::git(&repo, &["stash", "-u"]);
         assert_eq!(stash_count(&repo).unwrap(), 1);
+    }
+
+    #[test]
+    fn parses_worktree_porcelain() {
+        let text = "worktree /git/repo\nHEAD aaa\nbranch refs/heads/main\n\n\
+                    worktree /wt/feature\nHEAD bbb\nbranch refs/heads/feat/x\nlocked\n\n\
+                    worktree /wt/gone\nHEAD ccc\ndetached\nprunable gitdir file points to non-existent location\n";
+        let wts = parse_worktree_porcelain(text);
+        assert_eq!(wts.len(), 3);
+        assert_eq!(wts[0].branch.as_deref(), Some("main"));
+        assert_eq!(wts[1].branch.as_deref(), Some("feat/x"));
+        assert!(wts[1].locked);
+        assert_eq!(wts[2].branch, None);
+        assert!(wts[2].prunable);
+    }
+
+    #[test]
+    fn default_branch_falls_back_to_local_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        make_repo(&repo, None);
+        assert_eq!(default_branch(&repo).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn main_worktree_of_a_linked_worktree_is_the_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        make_repo(&repo, None);
+        let wt = dir.path().join("wt");
+        add_worktree(&repo, &wt, "feature");
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap();
+        assert_eq!(canon(&main_worktree(&wt).unwrap()), canon(&repo));
+        assert_eq!(canon(&main_worktree(&repo).unwrap()), canon(&repo));
+        assert_eq!(branch_reflog_len(&repo, "feature"), 1);
     }
 }

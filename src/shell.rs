@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 
 use crate::config::Config;
+use crate::query::{self, Candidate};
 use crate::scan;
 
 /// A shell that fussy-git can emit an integration snippet for.
@@ -89,7 +90,7 @@ end
 ///
 /// `query` is matched case-insensitively as a substring of each repo's
 /// `host/owner/repo` slug and of its `owner/repo` project path. Zero matches or
-/// more than one is an error (the latter lists the candidate slugs).
+/// more than one is a [`query::MatchError`] (the latter carries the candidates).
 ///
 /// Note: this walks the filesystem via [`scan::scan`]; a future revision may
 /// serve it from the index module for speed.
@@ -99,7 +100,7 @@ pub fn cd_target(cfg: &Config, query: &str) -> Result<PathBuf> {
         bail!("empty query");
     }
 
-    let mut matches: Vec<(String, PathBuf)> = Vec::new();
+    let mut matches: Vec<Candidate> = Vec::new();
     for d in scan::scan(cfg)? {
         let (slug, project) = match &d.identity {
             Some(id) => (id.to_string(), id.project_path()),
@@ -109,24 +110,12 @@ pub fn cd_target(cfg: &Config, query: &str) -> Result<PathBuf> {
             }
         };
         let hit = slug.to_lowercase().contains(&needle) || project.to_lowercase().contains(&needle);
-        if hit && !matches.iter().any(|(_, p)| p == &d.path) {
-            matches.push((slug, d.path));
+        if hit {
+            matches.push(Candidate { slug, path: d.path });
         }
     }
 
-    matches.sort();
-    match matches.len() {
-        1 => Ok(matches.pop().expect("length checked").1),
-        0 => bail!("no repo matches {query:?}"),
-        n => {
-            let list = matches
-                .iter()
-                .map(|(slug, _)| slug.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            bail!("{n} repos match {query:?}:\n{list}")
-        }
-    }
+    Ok(query::exactly_one(query, matches)?.path)
 }
 
 #[cfg(test)]
@@ -201,9 +190,15 @@ mod tests {
     #[test]
     fn cd_target_lists_candidates_when_ambiguous() {
         let (_tmp, cfg) = tree();
-        let err = cd_target(&cfg, "rust-lang").unwrap_err().to_string();
+        let err = cd_target(&cfg, "rust-lang").unwrap_err();
+        let Some(crate::query::MatchError::Ambiguous { candidates, .. }) = err.downcast_ref()
+        else {
+            panic!("expected a typed ambiguity error, got {err:#}");
+        };
+        assert_eq!(candidates.len(), 2);
+        let err = err.to_string();
         assert!(err.contains("github.com/rust-lang/rust"), "{err}");
         assert!(err.contains("github.com/rust-lang/cargo"), "{err}");
-        assert!(err.contains("2 repos match"), "{err}");
+        assert!(err.contains("matches 2 repositories"), "{err}");
     }
 }

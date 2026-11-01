@@ -33,6 +33,8 @@ pub struct ListFilter {
     pub owner: Option<String>,
     pub dirty: bool,
     pub unpushed: bool,
+    /// Restrict to these `host/owner/repo` slugs (the members of an `@set`).
+    pub slugs: Option<Vec<String>>,
 }
 
 /// List managed repositories to stdout.
@@ -54,6 +56,9 @@ fn render<W: Write>(
         filter.host.as_deref(),
         filter.owner.as_deref(),
     );
+    if let Some(slugs) = &filter.slugs {
+        selected.retain(|e| e.slug().is_some_and(|s| slugs.contains(&s)));
+    }
     if filter.dirty {
         selected.retain(|e| git::is_dirty(&e.path).unwrap_or(false));
     }
