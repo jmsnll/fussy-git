@@ -110,7 +110,7 @@ Template placeholders: `{host}`, `{owner}`, `{group_path}` (an alias for
 |---|---|
 | `get <target>` | Clone into the canonical path. Idempotent. `--branch`, `--shallow`, `--update`. |
 | `list [query]` | List managed repositories from the index. `--path`, `--json`, `--dirty`, `--unpushed`, `--host`, `--owner`. |
-| `cd <query>` | Print the path of the single matching repository, for shell `cd`. |
+| `cd <query>` | Print the path of the single matching repository, for shell `cd`. `repo@branch` selects a branch's worktree. |
 | `info [query]` | Describe one repository: identity, placement, branch, state, worktrees. Defaults to the one you are in. |
 | `status [query]` | Parallel working-tree status: branch, ahead/behind, dirty, stashes. |
 | `pull [query]` | Parallel `git pull --ff-only` with a summary. |
@@ -119,8 +119,8 @@ Template placeholders: `{host}`, `{owner}`, `{group_path}` (an alias for
 | `reconcile` | Report misplaced repositories, duplicates, and collisions. `--apply` performs the moves; `--plan <file>` applies exactly a reviewed `--json` plan; `--allow-dirty`, `--leave-symlink`, `--on-collision`. |
 | `adopt <path>` | Move an existing checkout to its canonical path. `--as host/owner/repo` for a repository with no usable remote. |
 | `remove <query>` | Delete one managed repository after checking for unsaved work. `--force`, `--yes`, `--dry-run`. |
-| `worktree add\|list\|prune\|remove` | Linked worktrees at `<root>/.worktrees/<host>/<owner>/<repo>/<branch>`, and cleanup of merged ones. |
-| `doctor` | Read-only health report: misplaced, duplicate, broken, detached, (with `--stale 90d`) stale repositories, and prunable worktrees. |
+| `worktree list` | Linked worktrees across repositories, whichever tool made them. `cd repo@branch` jumps to one. |
+| `doctor` | Read-only health report: misplaced, duplicate, broken, detached, (with `--stale 90d`) stale repositories, and broken worktrees. |
 | `browse` | Full-screen fuzzy repository picker. |
 | `shell-init <bash\|zsh\|fish>` | Print the `fg` shell integration for `eval`. |
 | `root` | Print the configured root or roots. |
@@ -136,7 +136,7 @@ config, e.g. `fussy-git get @payments`, `fussy-git status @payments`.
 | `0` | Success |
 | `1` | Runtime error |
 | `2` | Usage error |
-| `3` | Drift found by a read-only check (`reconcile` and `worktree prune` dry-runs, `doctor`) |
+| `3` | Drift found by a read-only check (`reconcile` dry-run, `doctor`) |
 | `4` | At least one repository in a batch operation failed |
 
 Pass `--json` to any command for a single JSON document on stdout; errors are
@@ -151,8 +151,10 @@ with `--color=always|never`.
 ## With Claude Code and other agents
 
 fussy-git is built to be driven by coding agents as well as people: JSON output
-everywhere, plan-then-apply for anything that moves files, concurrency-safe
-clones, and worktrees at predictable paths for parallel work. The repository
+everywhere, plan-then-apply for anything that moves files, and concurrency-safe
+clones. For parallel work on branches it pairs with
+[Worktrunk](https://jmsnll.github.io/fussy-git/worktrunk.html): fussy-git
+decides where repositories live, `wt` manages the worktrees inside them. The repository
 ships a Claude Code plugin containing a skill and a hook that redirects
 `git clone` to `fussy-git get`:
 
@@ -172,8 +174,7 @@ cargo fmt --check
 
 ## Status
 
-Feature-complete for v1. A fork workflow for `get` (`--fork`) is not implemented,
-and Windows is not yet supported.
+Windows is not yet supported.
 
 ## License
 

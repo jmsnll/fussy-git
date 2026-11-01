@@ -42,16 +42,6 @@ pub enum OnCollision {
     Skip,
 }
 
-/// Whether `get` on a repo you cannot push to should create a fork.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ForkPolicy {
-    #[default]
-    Prompt,
-    Always,
-    Never,
-}
-
 /// Per-host overrides, keyed in the file by the canonical host
 /// (`[hosts."github.com"]`).
 #[derive(Debug, Clone)]
@@ -68,14 +58,21 @@ pub struct HostRule {
 
 /// Shell commands run after lifecycle events. Each runs in the repository
 /// directory.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default)]
 pub struct Hooks {
     pub post_get: Vec<String>,
     pub post_move: Vec<String>,
-    pub post_reconcile: Vec<String>,
-    /// Run in a new worktree after `worktree add` creates it.
-    pub post_worktree: Vec<String>,
+}
+
+/// `[hooks]` as written, including hooks that are still accepted but no longer
+/// run, so an old config keeps loading.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct RawHooks {
+    post_get: Vec<String>,
+    post_move: Vec<String>,
+    post_reconcile: Option<toml::Value>,
+    post_worktree: Option<toml::Value>,
 }
 
 /// A fully validated configuration.
@@ -91,11 +88,7 @@ pub struct Config {
     /// Host assumed for the bare `owner/repo` shorthand.
     pub default_host: String,
     pub on_collision: OnCollision,
-    pub fork: ForkPolicy,
     pub hooks: Hooks,
-    /// Where `worktree add` creates linked worktrees. Defaults to
-    /// `<root>/.worktrees`, which `scan` skips as a dot-directory.
-    pub worktree_root: PathBuf,
     /// Named groups of repositories (`[sets]`), addressed as `@name`. Each
     /// member is a `get` target: `owner/repo`, `host/owner/repo`, a URL, ….
     pub sets: BTreeMap<String, Vec<String>>,
@@ -104,6 +97,10 @@ pub struct Config {
     ignore_set: GlobSet,
     /// Absolute path the config was loaded from, if any.
     pub source: Option<PathBuf>,
+    /// Notes about the file that do not stop it loading, such as keys that are
+    /// accepted for compatibility but no longer do anything. The CLI prints
+    /// them to stderr.
+    pub warnings: Vec<String>,
 }
 
 impl Default for Config {
@@ -116,14 +113,13 @@ impl Default for Config {
                 .expect("built-in template is valid"),
             default_host: default_host(),
             on_collision: OnCollision::default(),
-            fork: ForkPolicy::default(),
             hooks: Hooks::default(),
-            worktree_root: default_root().join(".worktrees"),
             sets: BTreeMap::new(),
             hosts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_set: GlobSet::empty(),
             source: None,
+            warnings: Vec::new(),
         }
     }
 }
@@ -213,14 +209,16 @@ struct RawConfig {
     default_template: Option<String>,
     default_host: Option<String>,
     on_collision: Option<OnCollision>,
-    fork: Option<ForkPolicy>,
+    /// Never implemented; accepted and ignored.
+    fork: Option<toml::Value>,
     #[serde(default)]
     ignore: Vec<String>,
     #[serde(default)]
     hosts: BTreeMap<String, RawHost>,
     #[serde(default)]
-    hooks: Hooks,
-    worktree_root: Option<String>,
+    hooks: RawHooks,
+    /// Removed with `worktree add` in 0.3.0; accepted and ignored.
+    worktree_root: Option<toml::Value>,
     #[serde(default)]
     sets: BTreeMap<String, Vec<String>>,
 }
@@ -288,10 +286,31 @@ impl RawConfig {
 
         let ignore_set = build_glob_set(&self.ignore)?;
 
-        let worktree_root = match &self.worktree_root {
-            Some(w) => expand(w)?,
-            None => root.join(".worktrees"),
+        let mut warnings = Vec::new();
+        let mut ignored = |key: &str, why: &str| {
+            warnings.push(format!("config key `{key}` is ignored: {why}; remove it"))
         };
+        if self.fork.is_some() {
+            ignored("fork", "the fork workflow was never implemented");
+        }
+        if self.worktree_root.is_some() {
+            ignored(
+                "worktree_root",
+                "`fussy-git worktree add` was removed (use `wt` or `git worktree`)",
+            );
+        }
+        if self.hooks.post_worktree.is_some() {
+            ignored(
+                "hooks.post_worktree",
+                "`fussy-git worktree add` was removed (use your worktree tool's hooks)",
+            );
+        }
+        if self.hooks.post_reconcile.is_some() {
+            ignored(
+                "hooks.post_reconcile",
+                "it never ran; use `hooks.post_move`",
+            );
+        }
 
         for (name, members) in &self.sets {
             if name.is_empty() || name.starts_with('@') || name.contains(char::is_whitespace) {
@@ -309,14 +328,16 @@ impl RawConfig {
             default_template,
             default_host: self.default_host.unwrap_or_else(default_host),
             on_collision: self.on_collision.unwrap_or_default(),
-            fork: self.fork.unwrap_or_default(),
-            hooks: self.hooks,
-            worktree_root,
+            hooks: Hooks {
+                post_get: self.hooks.post_get,
+                post_move: self.hooks.post_move,
+            },
             sets: self.sets,
             hosts,
             ignore_globs: self.ignore,
             ignore_set,
             source: None,
+            warnings,
         })
     }
 }
@@ -443,7 +464,6 @@ mod tests {
             jobs = 4
             default_host = "gitlab.com"
             on_collision = "suffix"
-            fork = "always"
             ignore = ["**/node_modules/**"]
 
             [hosts."github.com"]
@@ -468,7 +488,7 @@ mod tests {
         assert_eq!(c.jobs, 4);
         assert_eq!(c.default_host, "gitlab.com");
         assert_eq!(c.on_collision, OnCollision::Suffix);
-        assert_eq!(c.fork, ForkPolicy::Always);
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.hooks.post_get, vec!["direnv allow".to_string()]);
         assert_eq!(c.source.as_deref(), Some(path.as_path()));
     }
@@ -556,5 +576,28 @@ mod tests {
         // No env override in this test's environment.
         let found = discover(&nested).unwrap();
         assert_eq!(found.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn removed_keys_still_load_with_a_warning() {
+        let (_dir, path) = write_config(
+            r#"
+            fork = "always"
+            worktree_root = "~/git/.worktrees"
+            [hooks]
+            post_reconcile = ["x"]
+            post_worktree = ["npm ci"]
+            "#,
+        );
+        let c = Config::load_from(&path).unwrap();
+        let joined = c.warnings.join("\n");
+        for key in [
+            "`fork`",
+            "`worktree_root`",
+            "`hooks.post_worktree`",
+            "`hooks.post_reconcile`",
+        ] {
+            assert!(joined.contains(key), "{key} missing from {joined}");
+        }
     }
 }

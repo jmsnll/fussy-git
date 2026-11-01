@@ -39,6 +39,10 @@ Ambiguous or unmatched queries are an error. This is the primitive the
 [shell integration](./shell.md) is built on; most people use the `fg` function
 rather than calling `cd` directly.
 
+`QUERY@BRANCH` picks the checkout of that branch, which is either the main
+clone or a linked [worktree](./worktree.md): `fussy-git cd api@feat-auth`.
+Linked worktrees are never matched as repositories in their own right.
+
 ```sh
 cd "$(fussy-git cd fussy)"
 fussy-git cd fussy --json      # {"path": …}, or {"error": {"code": "ambiguous", "candidates": […]}}

@@ -23,8 +23,9 @@ use crate::config;
 use crate::query::{self, Candidate, MatchError};
 use crate::scan::{self, Discovered};
 
-/// The on-disk cache format version. Bump when the shape below changes.
-const CACHE_VERSION: u32 = 1;
+/// The on-disk cache format version. Bump when the shape below changes, or
+/// when what is recorded changes (2: linked worktrees are no longer entries).
+const CACHE_VERSION: u32 = 2;
 
 /// One managed repository, flattened for cheap listing and JSON output.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -231,7 +232,14 @@ fn load_or_build_at(cfg: &config::Config, cache: &Path) -> Result<Index> {
 
 fn build_at(cfg: &config::Config, cache: &Path) -> Result<Index> {
     let discovered = scan::scan(cfg)?;
-    let entries: Vec<RepoEntry> = discovered.iter().map(RepoEntry::from_discovered).collect();
+    // Linked worktrees (Worktrunk puts them beside the repository, inside the
+    // root) belong to their repository; as entries of their own they would
+    // make `cd api` ambiguous between `api` and `api.feat-auth`.
+    let entries: Vec<RepoEntry> = discovered
+        .iter()
+        .filter(|d| d.class != scan::Class::LinkedWorktree)
+        .map(RepoEntry::from_discovered)
+        .collect();
     let roots: Vec<RootMeta> = cfg.roots.iter().map(|r| root_meta(r)).collect();
 
     let file = CacheFile {

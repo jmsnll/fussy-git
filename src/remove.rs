@@ -25,9 +25,13 @@ pub struct RemovePlan {
     /// `host/owner/repo`, when the repository's remote could be resolved.
     pub slug: Option<String>,
     /// Human-readable reasons the delete is risky: a dirty tree, unpushed
-    /// commits, stash entries, an operation in progress, or linked worktrees.
-    /// Empty means a clean delete.
+    /// commits, stash entries, or an operation in progress. Empty means a
+    /// clean delete. `--force` overrides these.
     pub blockers: Vec<String>,
+    /// Linked worktrees of the repository. Deleting it would leave each one
+    /// pointing at a git directory that no longer exists, so these are never
+    /// overridden by `--force`: remove the worktrees first.
+    pub worktrees: Vec<PathBuf>,
 }
 
 impl RemovePlan {
@@ -54,6 +58,7 @@ pub fn plan(cfg: &config::Config, query: &str) -> Result<RemovePlan> {
         path: entry.path.clone(),
         slug: entry.slug(),
         blockers: blockers(&safety),
+        worktrees: safety.linked_worktrees,
     })
 }
 
@@ -79,6 +84,18 @@ pub fn execute(cfg: &config::Config, plan: &RemovePlan, force: bool) -> Result<(
 /// this itself; the CLI also calls it before prompting, so a refusal is
 /// reported without first asking a question whose answer cannot matter.
 pub fn check(plan: &RemovePlan, force: bool) -> Result<()> {
+    if !plan.worktrees.is_empty() {
+        bail!(
+            "refusing to remove {}: it has linked worktrees, which would be left broken:\n{}\n\
+             remove them first (`wt remove`, or `git worktree remove <path>`); --force does not override this",
+            plan.label(),
+            plan.worktrees
+                .iter()
+                .map(|w| format!("  - {}", w.display()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
     if !plan.blockers.is_empty() && !force {
         bail!(
             "refusing to remove {}:\n{}\npass --force to remove anyway",
@@ -112,9 +129,6 @@ fn blockers(safety: &Safety) -> Vec<String> {
     }
     if safety.op_in_progress {
         out.push("operation in progress".to_string());
-    }
-    for wt in &safety.linked_worktrees {
-        out.push(format!("linked worktree: {}", wt.display()));
     }
     out
 }
@@ -223,5 +237,21 @@ mod tests {
         assert!(plan.blockers.is_empty());
         execute(&cfg, &plan, false).unwrap();
         assert!(!repo.exists());
+    }
+
+    #[test]
+    fn linked_worktrees_block_removal_even_with_force() {
+        let (_tmp, root) = tmp_root();
+        let cfg = cfg_with_root(&root);
+        let repo = root.join("github.com/me/busy");
+        make_repo(&repo, Some("git@github.com:me/busy.git"));
+        let wt = root.join("github.com/me/busy.feat");
+        crate::testutil::add_worktree(&repo, &wt, "feat");
+
+        let plan = plan(&cfg, "busy").unwrap();
+        assert_eq!(plan.worktrees.len(), 1);
+        let err = execute(&cfg, &plan, true).unwrap_err().to_string();
+        assert!(err.contains("--force does not override"), "{err}");
+        assert!(repo.exists() && wt.exists(), "nothing was deleted");
     }
 }

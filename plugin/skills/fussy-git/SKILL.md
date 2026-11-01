@@ -1,6 +1,6 @@
 ---
 name: fussy-git
-description: Use whenever a task needs another git repository's source (a dependency, a sibling service, an upstream project), a separate worktree or branch checkout to work in parallel, or an action across several repositories (status, a search, a scripted change). Covers cloning with `fussy-git get` instead of `git clone`, creating and cleaning up worktrees with `fussy-git worktree`, finding out where you are with `fussy-git info`, and running commands across repositories with `fussy-git exec`. Also use when the user mentions fussy-git, ~/git, or a named set like `@payments`.
+description: Use whenever a task needs another git repository's source (a dependency, a sibling service, an upstream project), finding an existing checkout or worktree, or an action across several repositories (status, a search, a scripted change). Covers cloning with `fussy-git get` instead of `git clone`, finding repositories and worktrees, finding out where you are with `fussy-git info`, and running commands across repositories with `fussy-git exec`. Also use when the user mentions fussy-git, ~/git, or a named set like `@payments`.
 ---
 
 # fussy-git
@@ -47,24 +47,22 @@ owning repository.
 
 ## Working in parallel: worktrees
 
-To work on a branch without disturbing the main checkout, or to run several
-tasks side by side:
+fussy-git does not create worktrees. To work on a branch without disturbing the
+main checkout, or to run tasks side by side:
+
+- If `wt` (Worktrunk) is installed (`command -v wt`), use it:
+  `wt switch -c <branch>` creates a worktree, `wt remove` deletes it.
+- Otherwise use `claude --worktree` or `git worktree add`.
+
+To find worktrees that already exist, whichever tool made them:
 
 ```sh
-fussy-git worktree add . feat/login           # `.` = the repo you are in; prints the path
-fussy-git worktree add acme/api fix/timeout --base origin/release --json
+fussy-git worktree list --json [query | @set]   # {repo, path, branch, dirty, missing, …}
+fussy-git cd acme/api@feat-auth --json          # the checkout of that branch
 ```
 
-Worktrees go under `<root>/.worktrees/<host>/<owner>/<repo>/<branch>`. Running
-`add` again for the same branch returns the existing worktree. A new branch
-starts from the default branch with no upstream. Push it with
-`git push -u origin <branch>` when you are ready.
-
-When you are done with one, run `fussy-git worktree remove <path>`. This keeps
-the branch and refuses if there are uncommitted changes. To clean up after merged
-work, run `fussy-git worktree prune` first: it is a dry run that exits 3 if it
-found anything. Then run `fussy-git worktree prune --apply`. Merged branches are
-deleted with `git branch -d`; dirty or locked worktrees are never touched.
+`/` and `-` are interchangeable in `repo@branch`. If the branch isn't checked
+out anywhere, the error lists the branches that are.
 
 ## Across many repositories
 
@@ -101,5 +99,5 @@ silently do nothing.
 ## Exit codes
 
 `0` success, `1` error, `2` usage error, `3` a read-only check found something
-(`reconcile`, `doctor`, `worktree prune` dry runs), `4` some repositories in a
+(`reconcile` and `doctor`), `4` some repositories in a
 batch failed.

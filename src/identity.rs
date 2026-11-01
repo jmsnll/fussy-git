@@ -6,8 +6,8 @@
 //!
 //! * SSH `Host` alias resolution (`git@gh-personal:me/x` to a real host) — the
 //!   config layer runs `ssh -G` before an [`Identity`] is computed.
-//! * `url.<base>.insteadOf` rewrites and user-defined `rewrite` rules — applied
-//!   to the URL string before it reaches [`parse_url`].
+//! * `url.<base>.insteadOf` rewrites — git has already applied them to the URLs
+//!   `git remote` reports, before they reach [`parse_url`].
 
 use std::fmt;
 

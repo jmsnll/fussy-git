@@ -305,43 +305,6 @@ pub fn ref_exists(repo: &Path, full_ref: &str) -> bool {
     run(Some(repo), ["show-ref", "--verify", "--quiet", full_ref]).is_ok()
 }
 
-/// True if `rev` is an ancestor of (or equal to) `of`.
-pub fn is_ancestor(repo: &Path, rev: &str, of: &str) -> bool {
-    run(Some(repo), ["merge-base", "--is-ancestor", rev, of]).is_ok()
-}
-
-/// True if the branch's upstream is configured but no longer exists on the
-/// remote — the usual state after a pull request is merged and its branch
-/// deleted, and a fetch has pruned it.
-pub fn upstream_gone(repo: &Path, branch: &str) -> bool {
-    stdout(
-        Some(repo),
-        [
-            "for-each-ref",
-            "--format=%(upstream:track)",
-            &format!("refs/heads/{branch}"),
-        ],
-    )
-    .map(|t| t.contains("gone"))
-    .unwrap_or(false)
-}
-
-/// Number of reflog entries for a local branch. A branch that was only ever
-/// created (and never committed to, reset, or fast-forwarded) has exactly one.
-pub fn branch_reflog_len(repo: &Path, branch: &str) -> usize {
-    stdout(
-        Some(repo),
-        [
-            "reflog",
-            "show",
-            "--format=%H",
-            &format!("refs/heads/{branch}"),
-        ],
-    )
-    .map(|t| t.lines().filter(|l| !l.is_empty()).count())
-    .unwrap_or(0)
-}
-
 /// The main repository a working tree belongs to: itself for a normal
 /// checkout, the repository that owns it for a linked worktree.
 pub fn main_worktree(path: &Path) -> Result<PathBuf> {
@@ -514,6 +477,5 @@ mod tests {
         let canon = |p: &Path| std::fs::canonicalize(p).unwrap();
         assert_eq!(canon(&main_worktree(&wt).unwrap()), canon(&repo));
         assert_eq!(canon(&main_worktree(&repo).unwrap()), canon(&repo));
-        assert_eq!(branch_reflog_len(&repo, "feature"), 1);
     }
 }
