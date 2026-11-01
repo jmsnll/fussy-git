@@ -16,6 +16,7 @@ scripts.
 | `host/owner/repo`                   | `github.com/jmsnll/fussy-git`              |
 | `owner/repo` (uses `default_host`)  | `jmsnll/fussy-git`                         |
 | `alias:owner/repo`                  | `gh:jmsnll/fussy-git`                      |
+| `@set` (every member of a set)      | `@payments`                                |
 
 SSH `Host` aliases from `~/.ssh/config` and `url.insteadOf` rewrites are honoured
 because the clone shells out to `git`.
@@ -28,10 +29,24 @@ because the clone shells out to `git`.
 | `--shallow`       | Shallow clone (`--depth 1`).                         |
 | `-u`, `--update`  | Fast-forward pull if the repository already exists.  |
 
+## JSON
+
+With `--json`, `get` prints `{path, identity, created, updated, warnings}`.
+`created` is `false` when the repository was already there. For a `@set`, the
+output is an array with one element per member, and a member that failed has
+`{target, error}`. The command exits `4` if any member failed.
+
+## Concurrency
+
+The clone goes into a hidden sibling directory and is renamed into place. A
+failed clone leaves nothing behind, and two `get`s of the same repository
+running at once (two shells, two agents) both end up with the one checkout.
+
 ## Hooks
 
 After a successful clone, each `hooks.post_get` command runs with the new
-repository as its working directory.
+repository as its working directory. Hook output goes to stderr, so it never
+ends up in `$(fussy-git get …)`.
 
 ## Examples
 

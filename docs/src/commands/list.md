@@ -12,7 +12,7 @@ mtime, so it is cheap to run repeatedly.
 
 | Flag         | Meaning                                                        |
 | ------------ | ----------------------------------------------------------- |
-| `QUERY`      | Case-insensitive substring of `host/owner/repo`.               |
+| `QUERY`      | Case-insensitive substring of `host/owner/repo`, or `@set`.    |
 | `--host`     | Filter by host.                                                |
 | `--owner`    | Filter by owner.                                               |
 | `--dirty`    | Only repositories with uncommitted changes.                    |
@@ -41,4 +41,9 @@ rather than calling `cd` directly.
 
 ```sh
 cd "$(fussy-git cd fussy)"
+fussy-git cd fussy --json      # {"path": …}, or {"error": {"code": "ambiguous", "candidates": […]}}
 ```
+
+The index notices new and removed repositories through directory mtimes. It
+does not notice a changed remote URL; run `list --no-cache` after re-pointing
+a remote.

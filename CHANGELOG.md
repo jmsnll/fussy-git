@@ -4,6 +4,55 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Support for agent-driven workflows.
+
+### Added
+
+- Global `--json` flag. Every command writes one JSON document to stdout, and
+  errors become `{"error": {"code", "message", "candidates"?}}`, where an
+  ambiguous query lists its candidates.
+- `worktree add|list|prune|remove`: linked worktrees at
+  `<worktree_root>/<host>/<owner>/<repo>/<branch>` (default
+  `<root>/.worktrees`), and cleanup of missing, merged or upstream-deleted
+  worktrees. `prune` is a dry run unless `--apply`; dirty and locked worktrees
+  are never removed.
+- `exec [query] -- <cmd>`: run a command across repositories in parallel, with
+  per-repository exit code and captured output.
+- `info` (alias `here`): identity, placement, branch, default branch, state and
+  worktrees for one repository, by default the one containing the current
+  directory.
+- Named sets: `[sets]` in the config, addressed as `@name` by `get`, `list`,
+  `status`, `pull`, `fetch`, `exec` and `worktree list|prune`.
+- `reconcile --apply --plan <file>`: apply exactly a plan reviewed from
+  `reconcile --json`, refusing if the tree has changed since.
+- `remove --dry-run`.
+- `doctor` reports prunable worktrees.
+- `hook pre-tool-use`: a Claude Code `PreToolUse` hook that blocks `git clone`
+  and suggests the equivalent `fussy-git get`.
+- A Claude Code plugin (skill and hook) and marketplace manifest in the
+  repository.
+- `worktree_root` config key and `post_worktree` hook.
+
+### Changed
+
+- Prompts fail immediately with an explanation when stdin is not a terminal,
+  instead of reading EOF as "no" and exiting `0`. Pass `--yes` in scripts that
+  previously piped `yes`.
+- `get` clones into a hidden staging directory and renames it into place, so a
+  failed clone leaves nothing behind and concurrent `get`s of one repository
+  cannot collide.
+- The index cache is written atomically.
+- `cd` reports ambiguity with the same wording as `remove`.
+- `list --json` is now the global `--json` flag; `fussy-git list --json` works
+  as before.
+
+### Fixed
+
+- `get --update` no longer prints git's "Already up to date." on stdout, which
+  ended up inside `cd "$(fussy-git get -u …)"`. Hook output also goes to stderr.
+
 ## [0.1.1] - 2026-09-09
 
 ### Changed

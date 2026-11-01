@@ -17,13 +17,19 @@ compact report.
 
 | Flag           | Meaning                                                       |
 | -------------- | --------------------------------------------------------- |
-| `QUERY`        | Case-insensitive substring filter on the repository path.     |
+| `QUERY`        | Case-insensitive substring filter on the repository path, or `@set`. |
 | `-j`, `--jobs` | Max concurrent git processes. Defaults to config `jobs`.      |
 
 If any repository fails, the others still run and the command exits `4`.
+
+With `--json`, each command prints an array with one element per repository:
+`{repo, path, ok, error?}` plus `branch`, `ahead`, `behind`, `dirty`, `stashes`
+for `status`, and `result` (`updated` or `up_to_date`) for `pull`. To run
+something that is not a git operation, see [`exec`](./exec.md).
 
 ```sh
 fussy-git status                 # everything
 fussy-git pull github.com/acme   # just one owner's repos
 fussy-git fetch --jobs 4
+fussy-git status @payments --json
 ```

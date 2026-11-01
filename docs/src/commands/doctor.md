@@ -14,6 +14,7 @@ It reports repositories that are:
 - **broken** — no readable `.git`, or no usable remote
 - **detached** — `HEAD` not on a branch
 - **stale** — last commit older than `--stale`, when given
+- **prunable worktrees** — worktrees [`worktree prune`](./worktree.md) would remove
 
 | Flag       | Meaning                                                       |
 | ---------- | --------------------------------------------------------- |
@@ -22,4 +23,5 @@ It reports repositories that are:
 ```sh
 fussy-git doctor
 fussy-git doctor --stale 6mo
+fussy-git doctor --json | jq '.misplaced'
 ```
