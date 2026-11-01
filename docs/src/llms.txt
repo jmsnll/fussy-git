@@ -52,7 +52,7 @@ Key facts for answering questions about fussy-git:
 - [feature](https://jmsnll.github.io/fussy-git/commands/feature.html): one folder per cross-repository change, with a worktree of each repository on one branch
 - [Using with Worktrunk](https://jmsnll.github.io/fussy-git/worktrunk.html): fussy-git for repositories, Worktrunk for branches
 - [browse](https://jmsnll.github.io/fussy-git/commands/browse.html): interactive fuzzy repository picker
-- [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fg` function for bash, zsh, fish
+- [shell integration](https://jmsnll.github.io/fussy-git/commands/shell.html): the `fzg` function for bash, zsh, fish
 
 ## Source
 

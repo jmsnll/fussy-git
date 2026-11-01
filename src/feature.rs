@@ -156,13 +156,19 @@ fn validate_branch(branch: &str) -> Result<()> {
         .map_err(|_| anyhow!("{branch:?} is not a valid git branch name"))
 }
 
-/// Puppet r10k environments (one per control-repo branch) accept only
-/// `[a-z0-9_]`; other names are rewritten or rejected.
-fn r10k_safe(branch: &str) -> bool {
-    !branch.is_empty()
-        && branch
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+/// Enforce `feature_branch_pattern`, for teams whose tooling restricts branch
+/// names (Puppet r10k turns branches into environments named `[a-z0-9_]+`).
+fn check_branch_pattern(cfg: &Config, branch: &str) -> Result<()> {
+    if let Some(re) = &cfg.feature_branch_pattern {
+        if !re.is_match(branch) {
+            bail!(
+                "branch {branch:?} does not match feature_branch_pattern {:?} from your config; \
+                 pick another name or pass --branch",
+                re.as_str()
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Order members so that dependencies come first. Unknown dependencies are
@@ -284,6 +290,7 @@ pub fn new(cfg: &Config, name: &str, targets: &[String], opts: &NewOptions) -> R
         (None, None) => name.to_string(),
     };
     validate_branch(&branch)?;
+    check_branch_pattern(cfg, &branch)?;
     if existing.is_none() && targets.is_empty() {
         bail!(
             "name the repositories for the feature: `fussy-git feature new {name} <@set | repo…>`"
@@ -374,18 +381,6 @@ pub fn new(cfg: &Config, name: &str, targets: &[String], opts: &NewOptions) -> R
             }
         }
     }
-    if !r10k_safe(&branch)
-        && manifest
-            .members
-            .iter()
-            .any(|m| m.identity.contains("puppet") || m.identity.contains("control"))
-    {
-        warnings.push(format!(
-            "branch {branch:?} is not a valid Puppet r10k environment name (only a-z, 0-9 and _); \
-             r10k will rename or reject it"
-        ));
-    }
-
     // Fetch, so new branches start from the remote's current default branch.
     let repos: Vec<PathBuf> = manifest
         .members
@@ -1097,7 +1092,17 @@ mod tests {
     fn names_dirs_and_order() {
         assert!(validate_name("plat_123_sso").is_ok());
         assert!(validate_name("Feat/x").is_err());
-        assert!(r10k_safe("plat_123_sso") && !r10k_safe("feat-sso"));
+        let mut c = Config::default();
+        assert!(
+            check_branch_pattern(&c, "feat-sso").is_ok(),
+            "no pattern, no rule"
+        );
+        c.feature_branch_pattern = Some(regex::Regex::new("^[a-z0-9_]+$").unwrap());
+        assert!(check_branch_pattern(&c, "plat_123_sso").is_ok());
+        let err = check_branch_pattern(&c, "feat-sso")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("feature_branch_pattern"), "{err}");
         let m = |dir: &str, deps: &[&str]| Member {
             identity: format!("h/o/{dir}"),
             dir: dir.into(),

@@ -69,9 +69,16 @@ are added. `--depends` entries are merged into the manifest, and you can also
 edit `depends` in `.fussy-feature.toml` directly.
 
 The branch is the feature name unless you pass `--branch`. Feature names are
-lowercase letters, digits, `_`, `-` and `.`. If a puppet repository is
-involved and the branch isn't a valid r10k environment name (only `a-z`, `0-9`
-and `_`), you get a warning. `plat_123_sso` works everywhere.
+lowercase letters, digits, `_`, `-` and `.`.
+
+If your tooling restricts branch names, set `feature_branch_pattern` in the
+config, and `new` will refuse a branch that doesn't match, before creating
+anything. For example, Puppet r10k turns each control-repo branch into an
+environment, and environment names may only use `a-z`, `0-9` and `_`:
+
+```toml
+feature_branch_pattern = "^[a-z0-9_]+$"
+```
 
 ## status
 
@@ -105,7 +112,7 @@ It refuses, changing nothing, if any repository has:
 
 ## Elsewhere
 
-- **Other commands:** `list`, `cd` and `fg` show the main clones, never feature
+- **Other commands:** `list`, `cd` and `fzg` show the main clones, never feature
   worktrees. [`worktree list`](./worktree.md) shows each worktree with its
   `feature`, and `fussy-git cd api@sso` jumps to it.
 - **`reconcile` and `remove`** won't touch a repository while it belongs to a
@@ -115,4 +122,7 @@ It refuses, changing nothing, if any repository has:
 
 ## Configuration
 
-`features_root` (default `<root>/.features`) sets where features live.
+| Key                      | Default            | Meaning                                                  |
+| ------------------------ | ------------------ | -------------------------------------------------------- |
+| `features_root`          | `<root>/.features` | Where features live.                                     |
+| `feature_branch_pattern` | unset              | A regular expression that every feature branch must match. |

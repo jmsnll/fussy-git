@@ -112,8 +112,14 @@ enum Command {
     Feature(FeatureCmd),
     /// Interactive repository browser.
     Browse,
-    /// Print shell integration to pass to `eval`.
-    ShellInit { shell: ShellArg },
+    /// Print shell integration to pass to `eval`: a jump function, `fzg` by
+    /// default (`fzg api`, `fzg api@branch`, `fzg` alone to pick).
+    ShellInit {
+        shell: ShellArg,
+        /// Name of the jump function to define.
+        #[arg(long, default_value = shell::DEFAULT_CMD)]
+        cmd: String,
+    },
     /// Print the configured root directory or directories.
     Root,
     /// Hooks for coding agents. See the docs for wiring them up.
@@ -431,13 +437,14 @@ fn run(command: Command, format: Format) -> Result<ExitCode> {
         Command::Worktree(w) => cmd_worktree(&cfg, w, format),
         Command::Feature(f) => cmd_feature(&cfg, f, format),
         Command::Browse => cmd_browse(&cfg),
-        Command::ShellInit { shell } => {
+        Command::ShellInit { shell, cmd } => {
+            shell::validate_cmd(&cmd)?;
             let s = match shell {
                 ShellArg::Bash => shell::Shell::Bash,
                 ShellArg::Zsh => shell::Shell::Zsh,
                 ShellArg::Fish => shell::Shell::Fish,
             };
-            print!("{}", shell::init_script(s));
+            print!("{}", shell::init_script(s, &cmd));
             Ok(ExitCode::SUCCESS)
         }
         Command::Root => {

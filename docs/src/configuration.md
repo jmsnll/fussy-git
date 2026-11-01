@@ -16,6 +16,7 @@ default_host = "github.com"           # host for the bare `owner/repo` shorthand
 on_collision = "fail"                 # fail | suffix | skip
 ignore = ["**/node_modules/**", "~/git/scratch/**"]
 features_root = "~/git/.features"     # where `feature new` creates feature folders
+feature_branch_pattern = "^[a-z0-9_]+$"  # optional: branch names your tooling accepts
 
 [hosts."github.com"]
 alias = ["gh", "github"]              # `fussy-git get gh:jmsnll/fussy-git`
@@ -46,6 +47,7 @@ payments = ["acme/api", "acme/web", "gl:acme/infra"]   # address as @payments
 | `on_collision`     | `fail`                   | What to do when two remotes map to one path: `fail`/`suffix`/`skip`. |
 | `ignore`           | `[]`                     | Glob patterns for paths `reconcile` and the index skip.          |
 | `features_root`    | `<root>/.features`       | Where [`feature new`](./commands/feature.md) creates feature folders. |
+| `feature_branch_pattern` | unset                | A regular expression `feature new` requires branch names to match, e.g. `^[a-z0-9_]+$` for Puppet r10k. |
 
 ### Per-host `[hosts."<host>"]`
 

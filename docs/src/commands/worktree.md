@@ -24,7 +24,7 @@ is `{repo, repo_path, path, branch, head, locked, missing, dirty}`.
 ## Jumping to a branch
 
 `fussy-git cd api@feat-auth` prints the checkout that has `feat-auth` checked
-out, and the `fg` shell function uses it, so `fg api@feat-auth` takes you
+out, and the `fzg` shell function uses it, so `fzg api@feat-auth` takes you
 there. Other cases:
 
 - `api@main` is the main clone when `main` is checked out there.
@@ -37,7 +37,7 @@ there. Other cases:
 
 Worktrunk's default layout puts worktrees beside the repository, for example
 `~/git/github.com/acme/api.feat-auth`. fussy-git recognises these as worktrees
-of `api`, not as repositories of their own. `list`, `cd` and `fg` don't offer
+of `api`, not as repositories of their own. `list`, `cd` and `fzg` don't offer
 them, and `reconcile` and `doctor` don't count them.
 
 [`doctor`](./doctor.md) reports **broken worktrees**, meaning ones whose

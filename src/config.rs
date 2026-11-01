@@ -95,6 +95,9 @@ pub struct Config {
     /// Where `feature new` creates feature workspaces. Defaults to
     /// `<root>/.features`, which `scan` skips as a dot-directory.
     pub features_root: PathBuf,
+    /// When set, `feature new` refuses a branch name that does not match,
+    /// e.g. `^[a-z0-9_]+$` where branches become Puppet r10k environments.
+    pub feature_branch_pattern: Option<regex::Regex>,
     hosts: Vec<HostRule>,
     ignore_globs: Vec<String>,
     ignore_set: GlobSet,
@@ -119,6 +122,7 @@ impl Default for Config {
             hooks: Hooks::default(),
             sets: BTreeMap::new(),
             features_root: default_root().join(".features"),
+            feature_branch_pattern: None,
             hosts: Vec::new(),
             ignore_globs: Vec::new(),
             ignore_set: GlobSet::empty(),
@@ -226,6 +230,7 @@ struct RawConfig {
     #[serde(default)]
     sets: BTreeMap<String, Vec<String>>,
     features_root: Option<String>,
+    feature_branch_pattern: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,6 +349,12 @@ impl RawConfig {
             },
             sets: self.sets,
             features_root,
+            feature_branch_pattern: self
+                .feature_branch_pattern
+                .as_deref()
+                .map(regex::Regex::new)
+                .transpose()
+                .context("feature_branch_pattern is not a valid regular expression")?,
             hosts,
             ignore_globs: self.ignore,
             ignore_set,
@@ -610,5 +621,16 @@ mod tests {
         ] {
             assert!(joined.contains(key), "{key} missing from {joined}");
         }
+    }
+
+    #[test]
+    fn feature_branch_pattern_is_compiled_or_rejected() {
+        let (_dir, path) = write_config(r#"feature_branch_pattern = "^[a-z0-9_]+$""#);
+        let c = Config::load_from(&path).unwrap();
+        assert!(c.feature_branch_pattern.unwrap().is_match("plat_1_sso"));
+
+        let (_dir, path) = write_config(r#"feature_branch_pattern = "([unclosed""#);
+        let err = format!("{:#}", Config::load_from(&path).unwrap_err());
+        assert!(err.contains("feature_branch_pattern"), "{err}");
     }
 }

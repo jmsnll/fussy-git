@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-01
 
 ### Added
 
@@ -21,12 +21,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `exec` runs a command across the members.
   - `done` refuses on uncommitted changes, and on unpushed commits unless you
     pass `--force`. It keeps the branches and archives the folder.
-  - A warning when the branch isn't a valid Puppet r10k environment name.
+- `feature_branch_pattern` config key: `feature new` refuses a branch that
+  doesn't match, for teams whose tooling restricts branch names (for example
+  `^[a-z0-9_]+$` for Puppet r10k environments).
 - `worktree list` shows the `feature` each worktree belongs to.
 - `features_root` config key.
 
 ### Changed
 
+- The shell jump function is now `fzg` (it was `fg`, which hid the shell's
+  job-control builtin), and `fzg repo@branch` jumps to a branch's checkout.
+  `shell-init --cmd <name>` picks another name; names that would shadow a
+  builtin are rejected.
 - `doctor` and `remove` point to `feature new` and `feature done` for feature
   worktrees.
 - The plugin skill covers feature workflows: dependency order, pinned
@@ -158,6 +164,7 @@ Initial release.
   ignore globs, collision policy, and lifecycle hooks. SSH `Host` aliases and
   `url.insteadOf` are read live from git and ssh config.
 
+[0.4.0]: https://github.com/jmsnll/fussy-git/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jmsnll/fussy-git/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jmsnll/fussy-git/releases/tag/v0.2.0
 [0.1.1]: https://github.com/jmsnll/fussy-git/releases/tag/v0.1.1
