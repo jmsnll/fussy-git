@@ -73,3 +73,8 @@ pr-run-mode = "plan"
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
+
+# GitHub retires the macos-14 image dist defaults to for Apple Silicon on
+# 2026-11-02 (https://github.com/actions/runner-images/issues/13518).
+[workspace.metadata.dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
